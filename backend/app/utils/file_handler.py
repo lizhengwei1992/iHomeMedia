@@ -298,7 +298,7 @@ def list_media_files(
 
 def delete_media_file(file_id: str) -> bool:
     """
-    删除媒体文件和对应的缩略图
+    删除媒体文件和对应的缩略图、描述、embedding记录
     """
     try:
         # 查找文件
@@ -340,11 +340,147 @@ def delete_media_file(file_id: str) -> bool:
         # 删除媒体描述
         delete_media_description(file_id)
         
+        # 删除向量数据库中的embedding记录
+        try:
+            import asyncio
+            from app.services.vector_storage_service import get_vector_storage_service
+            
+            # 如果在异步上下文中运行，直接调用
+            # 否则创建新的事件循环
+            try:
+                loop = asyncio.get_running_loop()
+                # 在当前事件循环中创建任务
+                asyncio.create_task(_delete_embedding_record(file_id))
+                print(f"已添加embedding删除任务: {file_id}")
+            except RuntimeError:
+                # 没有运行中的事件循环，创建新的
+                asyncio.run(_delete_embedding_record(file_id))
+                print(f"已删除embedding记录: {file_id}")
+        except Exception as e:
+            print(f"删除embedding记录失败，但文件已删除: {str(e)}")
+            # 不因为embedding删除失败而中断文件删除
+        
         return True
         
     except Exception as e:
         print(f"删除文件失败: {str(e)}")
         return False
+
+
+async def _delete_embedding_record(file_id: str):
+    """
+    删除向量数据库中的embedding记录（内部辅助函数）
+    """
+    try:
+        from app.services.vector_storage_service import get_vector_storage_service
+        vector_storage = get_vector_storage_service()
+        
+        # 通过file_id查找对应的embedding记录
+        embedding_info = await vector_storage.get_media_embedding_info(file_id)
+        
+        if embedding_info:
+            # 使用找到的全局媒体ID删除记录
+            global_media_id = embedding_info['media_id']
+            success = await vector_storage.delete_media_embedding(global_media_id)
+            if success:
+                print(f"成功删除embedding记录: {file_id} -> {global_media_id}")
+            else:
+                print(f"删除embedding记录失败: {file_id}")
+        else:
+            print(f"未找到对应的embedding记录: {file_id}")
+            
+    except Exception as e:
+        print(f"删除embedding记录异常: {str(e)}")
+
+
+async def delete_media_file_async(file_id: str) -> bool:
+    """
+    异步删除媒体文件和所有相关数据
+    包括：原文件、缩略图、描述文件、embedding记录
+    """
+    try:
+        # 查找文件
+        all_files = []
+        base_dirs = [PHOTOS_DIR, VIDEOS_DIR]
+        
+        for base_dir in base_dirs:
+            for root, _, files in os.walk(base_dir):
+                for file in files:
+                    if file == file_id:
+                        file_path = os.path.join(root, file)
+                        all_files.append(file_path)
+        
+        if not all_files:
+            print(f"文件未找到: {file_id}")
+            raise FileNotFoundError(f"文件未找到: {file_id}")
+        
+        deleted_items = []
+        
+        # 通常应该只有一个文件，但以防万一
+        for file_path in all_files:
+            # 删除原文件
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                deleted_items.append(f"原文件: {file_path}")
+                print(f"删除原文件: {file_path}")
+            
+            # 删除对应的缩略图
+            rel_path = os.path.relpath(file_path, MEDIA_ROOT)
+            
+            # 对于HEIC和视频文件，缩略图是.jpg格式
+            if file_path.lower().endswith(('.heic', '.heif')) or get_media_type(file_path) == MediaType.VIDEO:
+                thumbnail_rel_path = rel_path.rsplit('.', 1)[0] + '.jpg'
+            else:
+                thumbnail_rel_path = rel_path
+            
+            thumbnail_path = os.path.join(MEDIA_ROOT, "thumbnails", thumbnail_rel_path)
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
+                deleted_items.append(f"缩略图: {thumbnail_path}")
+                print(f"删除缩略图: {thumbnail_path}")
+        
+        # 删除媒体描述
+        desc_deleted = delete_media_description(file_id)
+        if desc_deleted:
+            deleted_items.append(f"描述文件条目: {file_id}")
+            print(f"删除描述文件条目: {file_id}")
+        
+        # 删除向量数据库中的embedding记录
+        try:
+            from app.services.vector_storage_service import get_vector_storage_service
+            vector_storage = get_vector_storage_service()
+            
+            # 通过file_id查找对应的embedding记录
+            embedding_info = await vector_storage.get_media_embedding_info(file_id)
+            
+            if embedding_info:
+                # 使用找到的全局媒体ID删除记录
+                global_media_id = embedding_info['media_id']
+                success = await vector_storage.delete_media_embedding(global_media_id)
+                if success:
+                    deleted_items.append(f"Embedding记录: {global_media_id}")
+                    print(f"成功删除embedding记录: {file_id} -> {global_media_id}")
+                else:
+                    print(f"删除embedding记录失败: {file_id}")
+            else:
+                print(f"未找到对应的embedding记录: {file_id}")
+        except Exception as e:
+            print(f"删除embedding记录异常: {str(e)}")
+            # 不因为embedding删除失败而中断整个删除过程
+        
+        print(f"文件删除完成，共删除项目: {deleted_items}")
+        return True
+        
+    except Exception as e:
+        print(f"删除文件失败: {str(e)}")
+        return False
+
+
+def delete_media_file_sync(file_id: str) -> bool:
+    """
+    同步删除媒体文件（兼容旧代码调用）
+    """
+    return delete_media_file(file_id)
 
 
 def find_media_file_by_id(file_id: str) -> Optional[Dict]:

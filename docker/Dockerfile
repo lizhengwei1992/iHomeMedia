@@ -1,28 +1,62 @@
-FROM python:3.9-slim
+# 多阶段构建 - 后端生产环境
+FROM python:3.11-slim as base
 
+# 设置工作目录
 WORKDIR /app
 
-# 安装依赖
-COPY backend/requirements.txt /app/requirements.txt
-RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple/ --no-cache-dir -r requirements.txt
+# 安装系统依赖
+RUN apt-get update && apt-get install -y \
+    curl \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 复制后端代码
-COPY backend/app /app/app
-COPY backend/static /app/static
-COPY media /app/media
+# 复制依赖文件
+COPY requirements.txt .
 
-# 如果前端已构建，复制前端文件
-COPY frontend/dist /app/frontend/dist
+# 安装Python依赖
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 设置环境变量
-ENV PYTHONPATH=/app
-ENV PORT=5000
+# 复制应用代码
+COPY . .
 
-# 创建媒体目录
-RUN mkdir -p /app/media/photos /app/media/videos /app/media/thumbnails
+# 创建非root用户
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN chown -R appuser:appuser /app
+
+# 创建必要的目录
+RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
+
+# 健康检查端点
+COPY <<EOF /app/health.py
+from fastapi import FastAPI
+import uvicorn
+
+app = FastAPI()
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5000)
+EOF
+
+# 切换到非root用户
+USER appuser
 
 # 暴露端口
 EXPOSE 5000
 
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
 # 启动命令
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--workers", "4"]

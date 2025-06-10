@@ -98,9 +98,10 @@ class QdrantManager:
             # 确保ID是字符串格式的UUID或整数
             point_id = media_id
             if isinstance(media_id, str) and not media_id.isdigit():
-                # 如果是字符串但不是数字，尝试转换为hash值
+                # 如果是字符串但不是数字，尝试转换为安全的hash值
                 import hashlib
-                point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:15], 16)
+                # 使用MD5哈希的前7位（28位整数），确保在安全范围内
+                point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:7], 16)
             
             # 在元数据中保存原始ID
             metadata['original_media_id'] = media_id
@@ -338,7 +339,8 @@ class QdrantManager:
             point_id = media_id
             if isinstance(media_id, str) and not media_id.isdigit():
                 import hashlib
-                point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:15], 16)
+                # 使用MD5哈希的前7位（28位整数），确保在安全范围内
+                point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:7], 16)
             
             self.client.delete(
                 collection_name=self.collection_name,

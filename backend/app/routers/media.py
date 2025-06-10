@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.security import get_current_user
 from app.schemas.media import MediaList, MediaType, UploadResult
-from app.utils.file_handler import get_media_type, list_media_files, save_upload_file, delete_media_file
+from app.utils.file_handler import get_media_type, list_media_files, save_upload_file, delete_media_file, delete_media_file_async
 from app.utils.media_processor import create_thumbnail, create_video_thumbnail
 from app.utils.description_handler import set_media_description
 from app.services.vector_storage_service import get_vector_storage_service
@@ -235,14 +235,27 @@ async def delete_media_file_endpoint(
     current_user: str = Depends(get_current_user)
 ) -> Any:
     """
-    删除媒体文件
+    删除媒体文件和所有相关数据
+    包括：原文件、缩略图、描述文件、向量数据库embedding记录
     """
     try:
-        success = delete_media_file(file_id)
+        # 使用改进的异步删除函数
+        success = await delete_media_file_async(file_id)
         if success:
-            return {"success": True, "message": "文件删除成功"}
+            return {
+                "success": True, 
+                "message": "文件及所有相关数据删除成功",
+                "deleted_items": [
+                    "原文件",
+                    "缩略图",
+                    "描述文件", 
+                    "embedding记录"
+                ]
+            }
         else:
             raise HTTPException(status_code=404, detail="文件未找到")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="文件未找到")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 

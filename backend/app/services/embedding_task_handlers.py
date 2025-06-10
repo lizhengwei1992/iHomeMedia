@@ -133,7 +133,8 @@ async def handle_description_update_task(payload: Dict[str, Any]) -> Dict[str, A
         # 转换全局媒体ID为数字ID（与Qdrant存储格式一致）
         if isinstance(media_id, str) and not media_id.isdigit():
             import hashlib
-            point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:15], 16)
+            # 使用MD5哈希的前7位（28位整数），确保在安全范围内
+            point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:7], 16)
             logger.info(f"转换字符串ID {media_id} 为数字ID: {point_id}")
         else:
             point_id = media_id

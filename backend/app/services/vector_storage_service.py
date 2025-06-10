@@ -247,33 +247,79 @@ class VectorStorageService:
     async def get_media_embedding_info(self, media_id: str) -> Optional[Dict[str, Any]]:
         """
         获取媒体文件的embedding信息
+        支持通过全局媒体ID或文件ID查找
         
         Args:
-            media_id: 媒体文件ID
+            media_id: 媒体文件ID（可以是全局ID或文件ID）
             
         Returns:
             Dict: embedding信息，如果不存在则返回None
         """
         try:
-            # 在Qdrant中搜索特定ID
-            results = await self.qdrant_manager.search_by_text(
-                query_vector=[0.0] * self.embedding_service.vector_dimension,
-                limit=1,
-                score_threshold=0.0,
-                filters=None
+            # 方法1：尝试作为全局媒体ID直接查找
+            if isinstance(media_id, str) and not media_id.isdigit():
+                import hashlib
+                # 使用MD5哈希的前7位（28位整数），确保在安全范围内
+                point_id = int(hashlib.md5(media_id.encode()).hexdigest()[:7], 16)
+            else:
+                point_id = media_id
+            
+            # 使用retrieve方法直接获取点信息
+            points = self.qdrant_manager.client.retrieve(
+                collection_name=self.qdrant_manager.collection_name,
+                ids=[point_id],
+                with_payload=True,
+                with_vectors=False  # 不需要向量数据，只要元数据
             )
             
-            # 这里简化处理，实际应该直接通过ID获取
-            # Qdrant的Python客户端支持通过ID获取点
-            # 但为了兼容性，我们暂时用这种方式
+            if points:
+                point = points[0]
+                embedding_info = {
+                    'media_id': media_id,
+                    'point_id': point_id,
+                    'metadata': point.payload,
+                    'exists': True
+                }
+                logger.debug(f"通过全局ID找到媒体文件embedding信息: {media_id}")
+                return embedding_info
             
-            # TODO: 实现直接通过ID获取点的方法
-            # point = self.qdrant_manager.client.retrieve(
-            #     collection_name=self.qdrant_manager.collection_name,
-            #     ids=[media_id]
-            # )
+            # 方法2：如果直接查找失败，尝试通过file_id或file_name搜索
+            logger.debug(f"直接查找失败，尝试通过file_id搜索: {media_id}")
             
-            return None  # 暂时返回None，后续完善
+            # 使用scroll方法查找所有记录
+            scroll_result = self.qdrant_manager.client.scroll(
+                collection_name=self.qdrant_manager.collection_name,
+                limit=100,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            records = scroll_result[0]
+            for record in records:
+                payload = record.payload
+                stored_file_id = payload.get('file_id', '')
+                stored_file_name = payload.get('file_name', '')
+                stored_original_name = payload.get('original_name', '')
+                
+                # 尝试多种匹配方式
+                if (stored_file_id == media_id or 
+                    stored_file_name == media_id or 
+                    stored_original_name == media_id or
+                    stored_file_name.endswith(media_id) or 
+                    media_id.endswith(stored_file_name)):
+                    
+                    embedding_info = {
+                        'media_id': payload.get('global_media_id', str(record.id)),  # 返回全局ID
+                        'point_id': record.id,
+                        'metadata': payload,
+                        'exists': True,
+                        'found_by_file_id': True
+                    }
+                    logger.info(f"通过file_id找到媒体文件embedding信息: {media_id} -> {embedding_info['media_id']}")
+                    return embedding_info
+            
+            logger.warning(f"未找到媒体文件embedding信息: {media_id}")
+            return None
             
         except Exception as e:
             logger.error(f"获取媒体文件embedding信息失败 {media_id}: {str(e)}")
