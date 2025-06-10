@@ -39,6 +39,29 @@ async def startup_event():
         # 可以选择是否继续启动应用
         # raise e
 
+    try:
+        # 初始化任务管理器
+        from app.services.task_manager import get_task_manager
+        task_manager = get_task_manager()
+        await task_manager.initialize()
+        print("✅ 后台任务管理器初始化成功")
+    except Exception as e:
+        print(f"❌ 任务管理器初始化失败: {str(e)}")
+        # 可以选择是否继续启动应用
+        # raise e
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """应用关闭时的清理操作"""
+    try:
+        # 关闭任务管理器
+        from app.services.task_manager import get_task_manager
+        task_manager = get_task_manager()
+        await task_manager.shutdown()
+        print("✅ 任务管理器已关闭")
+    except Exception as e:
+        print(f"❌ 任务管理器关闭失败: {str(e)}")
+
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,

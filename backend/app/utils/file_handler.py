@@ -107,7 +107,7 @@ async def save_upload_file(file: UploadFile, media_type: MediaType) -> Dict:
     relative_path = os.path.relpath(file_path, MEDIA_ROOT)
     upload_time = datetime.now().isoformat()
     
-    # 生成32位全局媒体ID
+    # 生成32位全局媒体ID（使用原始文件名和上传时间）
     global_media_id = generate_global_media_id(file.filename, upload_time)
     
     # 构建URL
@@ -345,3 +345,66 @@ def delete_media_file(file_id: str) -> bool:
     except Exception as e:
         print(f"删除文件失败: {str(e)}")
         return False
+
+
+def find_media_file_by_id(file_id: str) -> Optional[Dict]:
+    """
+    根据文件ID查找媒体文件信息
+    
+    Args:
+        file_id: 文件ID（文件名）
+        
+    Returns:
+        Dict: 文件信息字典，如果未找到返回None
+    """
+    try:
+        # 查找文件
+        base_dirs = [PHOTOS_DIR, VIDEOS_DIR]
+        
+        for base_dir in base_dirs:
+            for root, _, files in os.walk(base_dir):
+                for file in files:
+                    if file == file_id:
+                        file_path = os.path.join(root, file)
+                        
+                        # 获取文件信息
+                        file_size = os.path.getsize(file_path)
+                        file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+                        media_type = get_media_type(file)
+                        
+                        # 构建相对路径和URL
+                        rel_path = os.path.relpath(file_path, MEDIA_ROOT)
+                        url = f"/media/{rel_path}"
+                        
+                        # 缩略图URL
+                        thumbnail_url = None
+                        if media_type == MediaType.PHOTO:
+                            if file_path.lower().endswith(('.heic', '.heif')):
+                                thumbnail_rel_path = rel_path.rsplit('.', 1)[0] + '.jpg'
+                                thumbnail_url = f"/thumbnails/{thumbnail_rel_path}"
+                            else:
+                                thumbnail_url = f"/thumbnails/{rel_path}"
+                        elif media_type == MediaType.VIDEO:
+                            thumbnail_rel_path = rel_path.rsplit('.', 1)[0] + '.jpg'
+                            thumbnail_url = f"/thumbnails/{thumbnail_rel_path}"
+                        
+                        # 获取描述
+                        description = get_media_description(file_id)
+                        
+                        return {
+                            "id": file_id,
+                            "name": file,
+                            "type": media_type,
+                            "path": rel_path,
+                            "size": file_size,
+                            "url": url,
+                            "thumbnail_url": thumbnail_url,
+                            "upload_date": file_mtime.isoformat(),
+                            "description": description
+                        }
+        
+        return None
+        
+    except Exception as e:
+        print(f"查找文件失败 {file_id}: {str(e)}")
+        return None

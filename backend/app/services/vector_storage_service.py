@@ -112,14 +112,23 @@ class VectorStorageService:
             
             # 如果向量为空或None，用零向量填充
             vector_dim = self.embedding_service.vector_dimension
+            text_embedding_generated = False
+            image_embedding_generated = False
+            
             if not text_embedding or text_embedding is None:
                 text_embedding = [0.0] * vector_dim
                 logger.info(f"文本embedding为空，使用零向量: {media_id}")
+            else:
+                text_embedding_generated = True
+                
             if not image_embedding or image_embedding is None:
                 image_embedding = [0.0] * vector_dim
                 logger.info(f"图像embedding为空，使用零向量: {media_id}")
+            else:
+                image_embedding_generated = True
             
-            # 存储到向量数据库
+            # 确保即使描述为空也要存储记录到向量数据库
+            # 这样后续更新描述时就能找到对应的记录
             success = await self.qdrant_manager.insert_embedding(
                 media_id=media_id,
                 text_vector=text_embedding,
@@ -131,19 +140,19 @@ class VectorStorageService:
                 return EmbeddingResponse(
                     success=False,
                     media_id=media_id,
-                    text_embedding_generated=embedding_result.get('text_success', False),
-                    image_embedding_generated=embedding_result.get('image_success', False),
+                    text_embedding_generated=text_embedding_generated,
+                    image_embedding_generated=image_embedding_generated,
                     processing_time=time.time() - start_time,
                     error_message="向量数据库存储失败"
                 )
             
-            logger.info(f"成功存储媒体文件embedding: {media_id}")
+            logger.info(f"成功存储媒体文件embedding: {media_id} (文本: {text_embedding_generated}, 图像: {image_embedding_generated})")
             
             return EmbeddingResponse(
                 success=True,
                 media_id=media_id,
-                text_embedding_generated=embedding_result.get('text_success', False),
-                image_embedding_generated=embedding_result.get('image_success', False),
+                text_embedding_generated=text_embedding_generated,
+                image_embedding_generated=image_embedding_generated,
                 processing_time=time.time() - start_time
             )
             

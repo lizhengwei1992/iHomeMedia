@@ -1,6 +1,8 @@
 from typing import Any, List, Optional
 import logging
 import asyncio
+import re
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
@@ -95,49 +97,59 @@ async def upload_media_files(
                 except Exception as e:
                     logger.warning(f"保存描述到JSON失败: {str(e)}")
             
-            # 生成embedding并存储到向量数据库
+            # 添加后台embedding生成任务（无论描述是否为空都要创建）
+            task_id = None
             embedding_generated = False
-            embedding_error = None
             
             # 确保global_media_id不为None
             if not global_media_id:
                 logger.error("global_media_id为空，无法生成embedding")
-                embedding_error = "全局媒体ID为空"
             elif auto_generate_embeddings:
                 try:
-                    logger.info(f"开始为文件 {global_media_id} 生成embedding...")
-                    embedding_result = await vector_service.store_media_embedding(
-                        media_id=global_media_id,  # 使用32位全局ID
+                    # 使用任务管理器添加后台任务
+                    from app.services.task_manager import get_task_manager
+                    task_manager = get_task_manager()
+                    
+                    # 计算实际的缩略图文件路径（绝对路径）
+                    from app.core.config import MEDIA_ROOT
+                    import os
+                    
+                    if file_info["thumbnail_url"]:
+                        # 从URL转换为实际文件路径
+                        # thumbnail_url格式: "/thumbnails/photos/2025-06-10/IMG_4638_20250610162906.jpeg"
+                        thumbnail_rel_path = file_info["thumbnail_url"].replace("/thumbnails/", "")
+                        thumbnail_abs_path = os.path.join(MEDIA_ROOT, "thumbnails", thumbnail_rel_path)
+                    else:
+                        thumbnail_abs_path = file_info["file_path"]  # 如果没有缩略图，使用原文件
+                    
+                    # 添加embedding生成任务到后台队列，让后台任务创建完整记录
+                    # 注意：即使描述为空，也要创建任务，确保向量记录被创建
+                    task_id = task_manager.add_upload_embedding_task(
                         file_path=file_info["file_path"],
-                        file_type=media_type.value,
-                        file_size=file_info["file_size"],
-                        upload_time=file_info["upload_time"],  # 使用精确的上传时间
-                        description=description,
-                        force_regenerate=False,
-                        # 传递额外的元数据
+                        thumbnail_path=thumbnail_abs_path,  # 使用绝对路径
+                        description=description or '',  # 即使为空也传递空字符串
                         extra_metadata={
+                            "file_name": file_info["file_name"],
+                            "file_type": media_type.value,
+                            "file_size": file_info["file_size"],
+                            "upload_time": file_info["upload_time"],
                             "original_name": file_info["original_name"],
-                            "file_id": file_id,  # 保持兼容性
+                            "file_id": file_id,
                             "original_url": file_info["original_url"],
                             "thumbnail_url": file_info["thumbnail_url"],
                             "relative_path": file_info["relative_path"],
                             "width": file_info.get("width"),
-                            "height": file_info.get("height")
+                            "height": file_info.get("height"),
+                            "global_media_id": global_media_id,  # 传递全局ID
+                            "force_regenerate": False  # 不强制重新生成，创建新记录
                         }
                     )
                     
-                    if embedding_result.success:
-                        embedding_generated = True
-                        logger.info(f"媒体文件 {global_media_id} embedding生成成功 "
-                                  f"(文本: {embedding_result.text_embedding_generated}, "
-                                  f"图像: {embedding_result.image_embedding_generated})")
-                    else:
-                        embedding_error = embedding_result.error_message
-                        logger.warning(f"媒体文件 {global_media_id} embedding生成失败: {embedding_error}")
+                    logger.info(f"已添加embedding生成任务: {task_id} (文件: {global_media_id}, 缩略图: {thumbnail_abs_path})")
+                    embedding_generated = "queued"  # 标记为队列中
                         
                 except Exception as e:
-                    embedding_error = str(e)
-                    logger.error(f"生成embedding异常: {str(e)}")
+                    logger.error(f"添加embedding任务失败: {str(e)}")
             
             # 构建成功结果
             upload_result = {
@@ -153,11 +165,11 @@ async def upload_media_files(
                 "thumbnail_created": thumbnail_created,
                 "embedding_generated": embedding_generated,
                 "description": description,
-                "message": "上传成功"
+                "message": "上传成功" if embedding_generated != "queued" else "上传成功，embedding正在后台生成中"
             }
             
-            if embedding_error:
-                upload_result["embedding_error"] = embedding_error
+            if task_id:
+                upload_result["embedding_task_id"] = task_id
             
             results.append(upload_result)
         
@@ -245,10 +257,77 @@ async def update_media_description(
     更新媒体文件描述
     """
     try:
+        # 立即更新本地描述文件
         success = set_media_description(file_id, description)
-        if success:
-            return {"success": True, "message": "描述更新成功"}
-        else:
+        if not success:
             raise HTTPException(status_code=500, detail="描述更新失败")
+        
+        # 在向量数据库中查找与file_id匹配的记录
+        try:
+            from app.services.task_manager import get_task_manager
+            from app.database.qdrant_manager import get_qdrant_manager
+            
+            # 获取向量数据库管理器
+            qdrant_manager = get_qdrant_manager()
+            
+            # 通过滚动查询所有记录，查找file_name匹配的记录
+            scroll_result = qdrant_manager.client.scroll(
+                collection_name=qdrant_manager.collection_name,
+                limit=100,  # 增加限制以确保找到记录
+                with_payload=True,
+                with_vectors=False  # 不需要向量数据，只需要payload
+            )
+            
+            records = scroll_result[0]
+            matching_record = None
+            
+            # 查找匹配的记录
+            for record in records:
+                payload = record.payload
+                stored_file_name = payload.get('file_name', '')
+                stored_file_id = payload.get('file_id', '')
+                
+                # 尝试多种匹配方式
+                if (stored_file_name == file_id or 
+                    stored_file_id == file_id or 
+                    stored_file_name.endswith(file_id) or 
+                    file_id.endswith(stored_file_name)):
+                    matching_record = record
+                    logger.info(f"找到匹配的向量记录: {record.id} (payload file_name: {stored_file_name})")
+                    break
+            
+            if not matching_record:
+                logger.warning(f"未在向量数据库中找到匹配的记录: {file_id}")
+                return {"success": True, "message": "描述更新成功，但未找到对应的向量记录"}
+            
+            # 使用找到的记录ID和全局媒体ID
+            vector_record_id = matching_record.id
+            global_media_id = matching_record.payload.get('global_media_id', str(vector_record_id))
+            
+            logger.info(f"使用向量记录ID: {vector_record_id}, 全局媒体ID: {global_media_id}")
+            
+            # 添加后台任务更新embedding (使用找到的全局媒体ID)
+            task_manager = get_task_manager()
+            task_id = task_manager.add_description_update_task(
+                media_id=global_media_id,  # 使用向量数据库中存储的全局媒体ID
+                new_description=description,
+                file_path=file_id
+            )
+            
+            logger.info(f"已添加描述更新任务: {task_id} (文件: {file_id}, 向量ID: {vector_record_id})")
+            
+            return {
+                "success": True, 
+                "message": "描述更新成功，embedding将在后台更新",
+                "embedding_task_id": task_id,
+                "global_media_id": global_media_id,
+                "vector_record_id": vector_record_id
+            }
+            
+        except Exception as e:
+            logger.warning(f"添加描述更新任务失败: {str(e)}")
+            # 即使任务添加失败，描述本身已经更新成功
+            return {"success": True, "message": "描述更新成功"}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")

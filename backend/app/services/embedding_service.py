@@ -14,6 +14,7 @@ from http import HTTPStatus
 
 from app.core.config import settings
 from app.services.rate_limiter import get_rate_limiter
+from app.services.task_queue import get_rate_limiter as get_global_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,16 @@ class EmbeddingService:
             Dict: 包含向量和元信息的字典
         """
         if not text or not text.strip():
+            # 当文本为空时，返回零向量而不是报错
+            logger.info("文本内容为空，返回零向量")
             return {
-                'success': False,
-                'error': '文本内容不能为空'
+                'success': True,
+                'embedding': [0.0] * self.vector_dimension,
+                'type': 'text',
+                'dimension': self.vector_dimension,
+                'usage': None,
+                'request_id': None,
+                'is_zero_vector': True  # 标记这是零向量
             }
         
         try:
@@ -438,7 +446,7 @@ class EmbeddingService:
     
     async def embed_query_text(self, query: str) -> Dict[str, Any]:
         """
-        为搜索查询文本生成embedding
+        为搜索查询文本生成embedding（使用全局速率限制器，优先级最高）
         
         Args:
             query: 搜索查询文本
@@ -447,12 +455,92 @@ class EmbeddingService:
             Dict: 包含embedding向量的字典
         """
         if not query or not query.strip():
+            # 当查询文本为空时，返回零向量而不是报错
+            logger.info("查询文本为空，返回零向量")
             return {
-                'success': False,
-                'error': '查询文本不能为空'
+                'success': True,
+                'embedding': [0.0] * self.vector_dimension,
+                'type': 'text',
+                'dimension': self.vector_dimension,
+                'usage': None,
+                'request_id': None,
+                'is_zero_vector': True  # 标记这是零向量
             }
         
-        return await self.embed_text(query.strip())
+        return await self._embed_text_with_global_limiter(query.strip())
+    
+    async def _embed_text_with_global_limiter(self, text: str) -> Dict[str, Any]:
+        """使用全局速率限制器进行文本embedding（搜索专用）"""
+        global_rate_limiter = get_global_rate_limiter()
+        
+        try:
+            # 检查全局速率限制
+            if not global_rate_limiter.can_make_request():
+                wait_time = global_rate_limiter.get_wait_time()
+                if wait_time > 0:
+                    logger.info(f"等待全局速率限制: {wait_time:.1f}秒")
+                    await asyncio.sleep(wait_time)
+            
+            # 记录请求
+            global_rate_limiter.record_request()
+            
+            input_data = [{'text': text}]
+            
+            # 在线程池中执行同步API调用
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, 
+                lambda: dashscope.MultiModalEmbedding.call(
+                    model=self.model_name,
+                    input=input_data
+                )
+            )
+            
+            if resp.status_code == HTTPStatus.OK:
+                embedding_data = resp.output['embeddings'][0]
+                return {
+                    'success': True,
+                    'embedding': embedding_data['embedding'],
+                    'type': embedding_data['type'],
+                    'dimension': len(embedding_data['embedding']),
+                    'usage': resp.usage if resp.usage else None,
+                    'request_id': resp.request_id
+                }
+            else:
+                logger.error(f"搜索文本embedding请求失败: {resp}")
+                return {
+                    'success': False,
+                    'error': f"API调用失败: {resp.code} - {resp.message}"
+                }
+                
+        except Exception as e:
+            error_str = str(e)
+            logger.error(f"搜索文本embedding异常: {error_str}")
+            
+            # 处理不同类型的错误
+            if 'rate limit' in error_str.lower() or 'throttl' in error_str.lower():
+                error_msg = "请求过于频繁，请稍后重试"
+            elif 'InvalidApiKey' in error_str or 'Invalid API-key' in error_str:
+                error_msg = "API密钥无效，请检查.local.env文件中的DASHSCOPE_API_KEY配置"
+            elif 'SSLError' in error_str or 'SSL' in error_str:
+                error_msg = "网络连接异常，请检查网络环境或稍后重试"
+            elif 'ConnectionError' in error_str or 'Timeout' in error_str:
+                error_msg = "网络连接超时，请检查网络环境"
+            else:
+                error_msg = f"处理异常: {error_str}"
+            
+            return {
+                'success': False,
+                'error': error_msg
+            }
+    
+    # 为兼容性保留原有方法（用于非搜索的embedding生成）
+    async def get_text_embedding(self, text: str) -> Dict[str, Any]:
+        """获取文本embedding（为任务队列使用，使用原速率限制器）"""
+        return await self.embed_text(text)
+    
+    async def get_image_embedding(self, image_path: str) -> Dict[str, Any]:
+        """获取图像embedding（为任务队列使用，使用原速率限制器）"""
+        return await self.embed_image_from_file(image_path)
     
     async def batch_embed_media_files(
         self, 

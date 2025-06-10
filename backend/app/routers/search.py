@@ -31,17 +31,19 @@ async def search_by_text(
     current_user: str = Depends(get_current_user)
 ) -> Any:
     """
-    基于文本查询的搜索
+    基于文本查询的搜索（优先级最高，直接处理）
     策略：同时搜索文本模态和图像模态，合并去重返回结果
     """
     try:
-        vector_service = get_vector_storage_service()
+        # 使用任务管理器处理搜索（最高优先级）
+        from app.services.task_manager import get_task_manager
+        task_manager = get_task_manager()
         
-        # 执行搜索 - 不使用用户传入的阈值，始终使用配置的阈值
-        search_results = await vector_service.search_by_text(
+        # 执行搜索
+        search_results = await task_manager.handle_search_query(
             query=request.query,
-            limit=request.limit
-            # threshold参数不传递，让服务使用配置的阈值
+            limit=request.limit,
+            threshold=None  # 使用配置的默认阈值
         )
         
         if not search_results['success']:
@@ -174,12 +176,19 @@ async def get_rate_limit_status(
     获取API调用速率限制状态
     """
     try:
+        # 获取全局速率限制器状态
+        from app.services.task_queue import get_rate_limiter as get_global_rate_limiter
+        global_rate_limiter = get_global_rate_limiter()
+        global_status = global_rate_limiter.get_status()
+        
+        # 获取旧版速率限制器状态（向后兼容）
         rate_limiter = get_rate_limiter()
-        status = rate_limiter.get_status()
+        local_status = rate_limiter.get_status()
         
         return {
             "success": True,
-            "rate_limit_status": status,
+            "global_rate_limiter": global_status,
+            "local_rate_limiter": local_status,
             "embedding_service": "DashScope MultiModal Embedding v1"
         }
         
@@ -188,6 +197,65 @@ async def get_rate_limit_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取状态异常: {str(e)}"
+        )
+
+@router.get("/task/{task_id}")
+async def get_task_status(
+    task_id: str,
+    current_user: str = Depends(get_current_user)
+) -> Any:
+    """
+    获取任务状态
+    """
+    try:
+        from app.services.task_manager import get_task_manager
+        task_manager = get_task_manager()
+        
+        task_status = task_manager.get_task_status(task_id)
+        
+        if not task_status:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="任务不存在"
+            )
+        
+        return {
+            "success": True,
+            "task": task_status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取任务状态异常: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取任务状态异常: {str(e)}"
+        )
+
+@router.get("/queue-stats")
+async def get_queue_stats(
+    current_user: str = Depends(get_current_user)
+) -> Any:
+    """
+    获取任务队列统计信息
+    """
+    try:
+        from app.services.task_manager import get_task_manager
+        task_manager = get_task_manager()
+        
+        queue_stats = task_manager.get_queue_stats()
+        
+        return {
+            "success": True,
+            "stats": queue_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"获取队列统计异常: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取队列统计异常: {str(e)}"
         )
 
 @router.post("/migrate-descriptions")

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel
 
@@ -50,4 +50,12 @@ class UploadResult(BaseModel):
     file_type: MediaType
     file_size: int
     file_path: str
-    message: Optional[str] = None
+    file_id: Optional[str] = None  # 文件ID
+    global_media_id: Optional[str] = None  # 32位全局媒体ID
+    original_url: Optional[str] = None  # 原文件URL
+    thumbnail_url: Optional[str] = None  # 缩略图URL
+    thumbnail_created: Optional[bool] = None  # 是否创建了缩略图
+    embedding_generated: Optional[Union[bool, str]] = None  # embedding是否生成或状态
+    embedding_task_id: Optional[str] = None  # embedding任务ID
+    description: Optional[str] = None  # 文件描述
+    message: Optional[str] = None  # 响应消息
