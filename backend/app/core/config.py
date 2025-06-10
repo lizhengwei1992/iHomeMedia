@@ -72,7 +72,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None
     
     # 搜索配置
-    SEARCH_THRESHOLD: float = 0.15  # 搜索相似度阈值，只能通过环境变量配置
+    TEXT_SEARCH_THRESHOLD: float = 0.15  # 文本搜索相似度阈值
+    IMAGE_SEARCH_THRESHOLD: float = 0.5  # 图像搜索相似度阈值
+    SEARCH_THRESHOLD: float = 0.15  # 兼容旧配置，默认文本搜索阈值
 
     class Config:
         # 支持多个env文件，优先级从高到低

@@ -67,9 +67,42 @@ const HomePage = () => {
     }
   }
   
-  // 首次加载
+  // 首次加载和URL参数处理
   useEffect(() => {
-    loadMedia()
+    // 检查是否有从媒体查看器传递的搜索结果
+    const searchMode = searchParams.get('search_mode')
+    const query = searchParams.get('query')
+    const results = searchParams.get('results')
+    const totalResults = searchParams.get('total_results')
+    const searchTime = searchParams.get('search_time')
+    
+    if (searchMode === 'similar' && query && results) {
+      // 进入搜索模式，显示相似搜索结果
+      try {
+        const parsedResults = JSON.parse(results)
+        setIsSearchMode(true)
+        setSearchQuery(query)
+        setSearchResults(parsedResults)
+        setSearchStats({
+          totalResults: parseInt(totalResults || '0'),
+          searchTime: parseFloat(searchTime || '0')
+        })
+        
+        console.log('📋 加载相似搜索结果:', {
+          query,
+          resultsCount: parsedResults.length,
+          totalResults: parseInt(totalResults || '0')
+        })
+        
+        // 清除URL参数
+        setSearchParams({ tab: activeTab, page: currentPage.toString() })
+      } catch (err) {
+        console.error('解析搜索结果失败:', err)
+        loadMedia()
+      }
+    } else {
+      loadMedia()
+    }
   }, [])
   
   // 监听页码变化
@@ -125,9 +158,8 @@ const HomePage = () => {
     
     try {
       const response = await searchApi.searchByText({
-        query: query,
-        limit: 20
-        // threshold参数已移除，后端使用配置的固定阈值(0.15)
+        query: query
+        // threshold和limit参数已移除，后端使用配置的固定阈值
       })
       
       const data = response.data
@@ -166,7 +198,40 @@ const HomePage = () => {
     setError('')
   }
 
-
+  // 处理以图搜图
+  const handleImageSearch = async (file: File) => {
+    setIsSearching(true)
+    setIsSearchMode(true)
+    setSearchQuery(`图片搜索: ${file.name}`)
+    
+    try {
+      const response = await searchApi.searchByImage(file)
+      const data = response.data
+      
+      // 添加调试日志
+      console.log('🖼️ 以图搜图API响应:', {
+        success: data.success,
+        query: data.query,
+        resultsCount: data.results?.length || 0,
+        results: data.results?.slice(0, 2), // 仅显示前2个结果
+        totalResults: data.total_results,
+        searchTime: data.search_time
+      });
+      
+      setSearchResults(data.results || [])
+      setSearchStats({
+        totalResults: data.total_results || 0,
+        searchTime: data.search_time || 0
+      })
+    } catch (err) {
+      console.error('以图搜图失败:', err)
+      setSearchResults([])
+      setSearchStats({ totalResults: 0, searchTime: 0 })
+      setError('以图搜图失败，请稍后重试')
+    } finally {
+      setIsSearching(false)
+    }
+  }
   
   // 处理下拉刷新
   const handleRefresh = async () => {
@@ -222,6 +287,7 @@ const HomePage = () => {
         <div className="mb-6">
           <SearchBox
             onSearch={handleSearch}
+            onImageSearch={handleImageSearch}
             onClear={handleClearSearch}
             isLoading={isSearching}
             placeholder="搜索照片和视频内容..."

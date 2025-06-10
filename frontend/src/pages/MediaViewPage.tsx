@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { MediaItem } from '@/types/media'
-import { mediaApi } from '@/services/api'
+import { mediaApi, searchApi } from '@/services/api'
 
 const MediaViewPage = () => {
   const { mediaId } = useParams<{ mediaId: string }>()
@@ -18,6 +18,7 @@ const MediaViewPage = () => {
   const [description, setDescription] = useState('')
   const [isEditingDescription, setIsEditingDescription] = useState(false)
   const [tempDescription, setTempDescription] = useState('')
+  const [isSearchingSimilar, setIsSearchingSimilar] = useState(false)
   
   const containerRef = useRef<HTMLDivElement>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -90,6 +91,45 @@ const MediaViewPage = () => {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  // 处理找相似
+  const handleFindSimilar = async () => {
+    if (!media || media.type !== 'photo') return
+    
+    setIsSearchingSimilar(true)
+    
+    try {
+      // 调用相似搜索API
+      const response = await searchApi.searchSimilarByFilePath(media.path || '')
+      const data = response.data
+      
+      console.log('🔍 相似图片搜索API响应:', {
+        success: data.success,
+        query: data.query,
+        resultsCount: data.results?.length || 0,
+        totalResults: data.total_results,
+        searchTime: data.search_time
+      });
+      
+      // 跳转到首页并显示搜索结果
+      // 通过URL参数传递搜索结果
+      const searchParams = new URLSearchParams({
+        search_mode: 'similar',
+        query: data.query || `相似图片搜索: ${media.name}`,
+        results: JSON.stringify(data.results || []),
+        total_results: String(data.total_results || 0),
+        search_time: String(data.search_time || 0)
+      })
+      
+      navigate(`/?${searchParams.toString()}`)
+      
+    } catch (err) {
+      console.error('找相似失败:', err)
+      alert('找相似失败，请稍后重试')
+    } finally {
+      setIsSearchingSimilar(false)
+    }
   }
 
   // 处理删除
@@ -303,6 +343,26 @@ const MediaViewPage = () => {
             </div>
 
             <div className="flex items-center space-x-3">
+              {/* 找相似按钮（仅图片类型显示） */}
+              {media?.type === 'photo' && (
+                <button
+                  onClick={handleFindSimilar}
+                  disabled={isSearchingSimilar}
+                  className="text-white hover:text-blue-400 transition-colors disabled:opacity-50"
+                  title="找相似"
+                >
+                  {isSearchingSimilar ? (
+                    <svg className="w-6 h-6 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  ) : (
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  )}
+                </button>
+              )}
+              
               {/* 下载按钮 */}
               <button
                 onClick={handleDownload}

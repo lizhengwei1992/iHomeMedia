@@ -596,21 +596,22 @@ class VectorStorageService:
             
             query_vector = query_result['embedding']
             
-            # 使用配置的阈值，不允许修改
-            search_threshold = settings.SEARCH_THRESHOLD
+            # 使用对应的搜索阈值
+            text_threshold = settings.TEXT_SEARCH_THRESHOLD
+            image_threshold = settings.IMAGE_SEARCH_THRESHOLD
             
-            # 1. 搜索文本模态
+            # 1. 搜索文本模态（使用文本搜索阈值）
             text_results = await self.qdrant_manager.search_by_text(
                 query_vector=query_vector,
                 limit=limit * 2,  # 获取更多候选，确保去重后有足够结果
-                score_threshold=search_threshold
+                score_threshold=text_threshold
             )
             
-            # 2. 搜索图像模态
+            # 2. 搜索图像模态（使用图像搜索阈值）
             image_results = await self.qdrant_manager.search_by_image(
                 query_vector=query_vector,
                 limit=limit * 2,  # 获取更多候选，确保去重后有足够结果
-                score_threshold=search_threshold
+                score_threshold=image_threshold
             )
             
             # 3. 合并去重结果
@@ -647,9 +648,8 @@ class VectorStorageService:
             
             search_time = time.time() - start_time
             
-            logger.info(f"文本查询搜索完成: 文本模态{len(text_results)}个, "
-                       f"图像模态{len(image_results)}个, 合并后{len(final_results)}个, "
-                       f"阈值{search_threshold}")
+            logger.info(f"文本查询搜索完成: 文本模态{len(text_results)}个(阈值{text_threshold}), "
+                       f"图像模态{len(image_results)}个(阈值{image_threshold}), 合并后{len(final_results)}个")
             
             return {
                 'success': True,
@@ -657,7 +657,8 @@ class VectorStorageService:
                 'search_time': search_time,
                 'embedding_time': embedding_time,
                 'query': query,
-                'threshold_used': search_threshold,
+                'text_threshold_used': text_threshold,
+                'image_threshold_used': image_threshold,
                 'text_modal_count': len(text_results),
                 'image_modal_count': len(image_results),
                 'final_count': len(final_results)

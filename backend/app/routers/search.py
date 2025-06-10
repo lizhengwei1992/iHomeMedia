@@ -4,8 +4,11 @@
 """
 
 from typing import Any, List, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, File, UploadFile, Form
 from fastapi.responses import JSONResponse
+import tempfile
+import os
+import logging
 
 from app.core.security import get_current_user
 from app.models.search_models import (
@@ -18,8 +21,8 @@ from app.models.search_models import (
 from app.services.vector_storage_service import get_vector_storage_service
 from app.services.embedding_service import get_embedding_service
 from app.services.rate_limiter import get_rate_limiter
-from app.core.config import settings
-import logging
+from app.utils.media_processor import create_thumbnail, is_valid_image
+from app.core.config import settings, MEDIA_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ async def search_by_text(
         # 执行搜索
         search_results = await task_manager.handle_search_query(
             query=request.query,
-            limit=request.limit,
+            limit=1000,  # 大数量限制，实际由阈值控制
             threshold=None  # 使用配置的默认阈值
         )
         
@@ -291,4 +294,264 @@ async def migrate_descriptions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"迁移异常: {str(e)}"
+        )
+
+@router.post("/by-image", response_model=SearchResponse)
+async def search_by_image(
+    image: UploadFile = File(...),
+    current_user: str = Depends(get_current_user)
+) -> Any:
+    """
+    基于图像的搜索功能（以图搜图）
+    
+    Args:
+        image: 上传的图像文件
+        limit: 返回结果数量限制
+        current_user: 当前用户
+        
+    Returns:
+        SearchResponse: 搜索结果
+    """
+    temp_files = []  # 用于跟踪临时文件，确保清理
+    
+    try:
+        # 1. 验证文件类型
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="只支持图像文件"
+            )
+        
+        # 2. 读取并验证图像内容
+        image_content = await image.read()
+        if not is_valid_image(image_content):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无效的图像文件"
+            )
+        
+        # 3. 创建临时文件保存原始图像
+        with tempfile.NamedTemporaryFile(
+            suffix=os.path.splitext(image.filename or '.jpg')[1],
+            delete=False
+        ) as temp_file:
+            temp_file.write(image_content)
+            temp_original_path = temp_file.name
+            temp_files.append(temp_original_path)
+        
+        logger.info(f"以图搜图: 临时保存图像 {image.filename} 到 {temp_original_path}")
+        
+        # 4. 生成缩略图
+        thumbnail_path = create_thumbnail(temp_original_path)
+        if thumbnail_path:
+            temp_files.append(thumbnail_path)
+            processing_image_path = thumbnail_path
+            logger.info(f"使用缩略图进行搜索: {thumbnail_path}")
+        else:
+            processing_image_path = temp_original_path
+            logger.info(f"缩略图生成失败，使用原图进行搜索: {temp_original_path}")
+        
+        # 5. 生成图像embedding
+        embedding_service = get_embedding_service()
+        
+        logger.info(f"开始生成图像embedding...")
+        embedding_result = await embedding_service.embed_image_from_file(processing_image_path)
+        
+        if not embedding_result.get('success'):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"图像embedding生成失败: {embedding_result.get('error', '未知错误')}"
+            )
+        
+        image_embedding = embedding_result['embedding']
+        logger.info(f"成功生成图像embedding: {len(image_embedding)}维")
+        
+        # 6. 在向量数据库中搜索相似图像
+        from app.database.qdrant_manager import get_qdrant_manager
+        qdrant_manager = get_qdrant_manager()
+        
+        logger.info(f"开始在向量数据库中搜索相似图像...")
+        
+        search_results = await qdrant_manager.search_by_image(
+            query_vector=image_embedding,
+            limit=1000,  # 大数量限制，实际由阈值控制
+            score_threshold=None  # 使用配置的默认阈值
+        )
+        
+        logger.info(f"图像搜索完成，找到 {len(search_results)} 个结果")
+        
+        # 7. 处理搜索结果，转换为与文本搜索一致的格式
+        formatted_results = []
+        for result in search_results:
+            # 保持与文本搜索一致的数据结构：包含metadata字段
+            formatted_result = {
+                'media_id': str(result['media_id']),
+                'score': result['score'],
+                'metadata': result.get('metadata', {}),
+                'match_type': 'image'
+            }
+            formatted_results.append(formatted_result)
+        
+        return SearchResponse(
+            success=True,
+            query=f"image_search:{image.filename}",
+            total_results=len(formatted_results),
+            results=formatted_results,
+            search_time=embedding_result.get('processing_time', 0),
+            embedding_time=embedding_result.get('processing_time', 0)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"以图搜图异常: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索异常: {str(e)}"
+        )
+    finally:
+        # 8. 清理临时文件
+        for temp_file in temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    logger.info(f"已删除临时文件: {temp_file}")
+            except Exception as e:
+                logger.warning(f"删除临时文件失败 {temp_file}: {str(e)}")
+
+@router.post("/similar-by-file", response_model=SearchResponse)
+async def search_similar_by_file_path(
+    file_path: str = Form(..., description="媒体文件路径"),
+    current_user: str = Depends(get_current_user)
+) -> Any:
+    """
+    基于现有媒体文件路径的相似图片搜索功能
+    用于查看器中的"找相似"功能
+    
+    Args:
+        file_path: 媒体文件路径
+        limit: 返回结果数量限制
+        current_user: 当前用户
+        
+    Returns:
+        SearchResponse: 搜索结果
+    """
+    try:
+        # 1. 验证文件路径和类型
+        if not file_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件路径不能为空"
+            )
+        
+        # 构建完整的文件路径
+        import os
+        full_file_path = os.path.join(MEDIA_ROOT, file_path)
+        
+        if not os.path.exists(full_file_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"文件不存在: {file_path}"
+            )
+        
+        # 验证是否为图片文件
+        if not file_path.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.heic')):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="只支持图片文件的相似搜索"
+            )
+        
+        logger.info(f"相似图片搜索: 使用文件 {file_path}")
+        
+        # 2. 尝试使用缩略图，如果没有则使用原图
+        from app.utils.media_processor import create_thumbnail
+        
+        # 检查缩略图是否存在
+        thumbnail_dir = os.path.join(MEDIA_ROOT, "thumbnails")
+        thumbnail_rel_path = file_path
+        thumbnail_path = os.path.join(thumbnail_dir, thumbnail_rel_path)
+        
+        if os.path.exists(thumbnail_path):
+            processing_image_path = thumbnail_path
+            logger.info(f"使用现有缩略图: {thumbnail_path}")
+        else:
+            # 如果缩略图不存在，为原图生成缩略图
+            thumbnail_path = create_thumbnail(full_file_path)
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                processing_image_path = thumbnail_path
+                logger.info(f"生成新缩略图: {thumbnail_path}")
+            else:
+                processing_image_path = full_file_path
+                logger.info(f"使用原图: {full_file_path}")
+        
+        # 3. 生成图像embedding
+        embedding_service = get_embedding_service()
+        
+        logger.info(f"开始生成图像embedding...")
+        embedding_result = await embedding_service.embed_image_from_file(processing_image_path)
+        
+        if not embedding_result.get('success'):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"图像embedding生成失败: {embedding_result.get('error', '未知错误')}"
+            )
+        
+        image_embedding = embedding_result['embedding']
+        logger.info(f"成功生成图像embedding: {len(image_embedding)}维")
+        
+        # 4. 在向量数据库中搜索相似图像（排除自己）
+        from app.database.qdrant_manager import get_qdrant_manager
+        qdrant_manager = get_qdrant_manager()
+        
+        logger.info(f"开始在向量数据库中搜索相似图像...")
+        
+        search_results = await qdrant_manager.search_by_image(
+            query_vector=image_embedding,
+            limit=1000,  # 大数量限制，实际由阈值控制
+            score_threshold=None  # 使用配置的默认阈值
+        )
+        
+        logger.info(f"图像搜索完成，找到 {len(search_results)} 个结果")
+        
+        # 5. 过滤掉当前文件本身（通过路径匹配）
+        filtered_results = []
+        for result in search_results:
+            metadata = result.get('metadata', {})
+            result_path = metadata.get('relative_path', '') or metadata.get('file_path', '')
+            
+            # 跳过当前文件
+            if result_path == file_path:
+                continue
+                
+            # 保持与其他搜索一致的数据结构：包含metadata字段
+            formatted_result = {
+                'media_id': str(result['media_id']),
+                'score': result['score'],
+                'metadata': result.get('metadata', {}),
+                'match_type': 'similar_image'
+            }
+            filtered_results.append(formatted_result)
+            
+            # 不限制数量，返回所有满足阈值的结果
+        
+        return SearchResponse(
+            success=True,
+            query=f"similar_search:{os.path.basename(file_path)}",
+            total_results=len(filtered_results),
+            results=filtered_results,
+            search_time=embedding_result.get('processing_time', 0),
+            embedding_time=embedding_result.get('processing_time', 0)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"相似图片搜索异常: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"搜索异常: {str(e)}"
         ) 

@@ -146,8 +146,8 @@ class QdrantManager:
             List[Dict]: 搜索结果列表
         """
         try:
-            # 使用配置的阈值，不允许修改
-            threshold = score_threshold if score_threshold is not None else settings.SEARCH_THRESHOLD
+            # 使用配置的文本搜索阈值
+            threshold = score_threshold if score_threshold is not None else settings.TEXT_SEARCH_THRESHOLD
             
             search_result = await asyncio.to_thread(
                 self.client.search,
@@ -195,8 +195,8 @@ class QdrantManager:
             List[Dict]: 搜索结果列表
         """
         try:
-            # 使用配置的阈值，不允许修改
-            threshold = score_threshold if score_threshold is not None else settings.SEARCH_THRESHOLD
+            # 使用配置的图像搜索阈值
+            threshold = score_threshold if score_threshold is not None else settings.IMAGE_SEARCH_THRESHOLD
             
             search_result = await asyncio.to_thread(
                 self.client.search,

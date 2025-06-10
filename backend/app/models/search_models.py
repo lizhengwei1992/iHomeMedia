@@ -29,7 +29,6 @@ class SearchFilters(BaseModel):
 class SearchRequest(BaseModel):
     """搜索请求模型"""
     query: str = Field(..., description="搜索查询文本")
-    limit: int = Field(default=10, ge=1, le=100, description="返回结果数量限制")
     threshold: float = Field(default=settings.SEARCH_THRESHOLD, ge=0.0, le=1.0, description="相似度阈值")
 
 class SimilarSearchRequest(BaseModel):
