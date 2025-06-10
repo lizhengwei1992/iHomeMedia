@@ -532,7 +532,7 @@ class EmbeddingService:
                 'success': False,
                 'error': error_msg
             }
-    
+        
     # 为兼容性保留原有方法（用于非搜索的embedding生成）
     async def get_text_embedding(self, text: str) -> Dict[str, Any]:
         """获取文本embedding（为任务队列使用，使用原速率限制器）"""

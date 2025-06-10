@@ -35,7 +35,6 @@ interface SearchResultsProps {
 const SearchResults = ({ 
   results, 
   isLoading, 
-  query, 
   searchTime, 
   totalResults 
 }: SearchResultsProps) => {
@@ -115,11 +114,10 @@ const SearchResults = ({
           <InformationCircleIcon className="h-5 w-5 text-blue-400" />
           <div className="ml-3">
             <p className="text-sm text-blue-800">
-              找到 <span className="font-medium">{totalResults}</span> 个与 
-              "<span className="font-medium">{query}</span>" 相关的结果
+              找到 <span className="font-medium">{totalResults}</span> 个结果
               {searchTime && (
                 <span className="text-blue-600">
-                  （耗时 {(searchTime * 1000).toFixed(0)}ms）
+                  ，用时 {searchTime.toFixed(2)}s
                 </span>
               )}
             </p>

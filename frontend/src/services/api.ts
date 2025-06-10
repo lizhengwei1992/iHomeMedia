@@ -67,29 +67,32 @@ export const searchApi = {
   // 文本搜索
   searchByText: (params: {
     query: string;
+    limit?: number;
   }) => api.post('/search/text', params),
   
   // 以图搜图
-  searchByImage: (file: File) => {
+  searchByImage: (file: File, limit: number = 100) => {
     const formData = new FormData()
     formData.append('image', file)
     
     return api.post('/search/by-image', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
-      }
+      },
+      params: { limit }
     })
   },
   
   // 基于文件路径的相似搜索（用于查看器中的"找相似"功能）
-  searchSimilarByFilePath: (filePath: string) => {
+  searchSimilarByFilePath: (filePath: string, limit: number = 100) => {
     const formData = new FormData()
     formData.append('file_path', filePath)
     
     return api.post('/search/similar-by-file', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
-      }
+      },
+      params: { limit }
     })
   },
   

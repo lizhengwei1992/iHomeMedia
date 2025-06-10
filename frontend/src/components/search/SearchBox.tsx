@@ -83,7 +83,7 @@ const SearchBox = ({
           )}
           
           {/* 清除按钮 */}
-          {query && (
+        {query && (
             <button
               type="button"
               onClick={handleClear}
@@ -94,7 +94,7 @@ const SearchBox = ({
               <XIcon className="h-5 w-5" aria-hidden="true" />
             </button>
           )}
-        </div>
+          </div>
       </div>
       
       {/* 隐藏的文件输入 */}

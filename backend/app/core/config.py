@@ -72,9 +72,12 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: Optional[str] = None
     
     # 搜索配置
-    TEXT_SEARCH_THRESHOLD: float = 0.15  # 文本搜索相似度阈值
-    IMAGE_SEARCH_THRESHOLD: float = 0.5  # 图像搜索相似度阈值
-    SEARCH_THRESHOLD: float = 0.15  # 兼容旧配置，默认文本搜索阈值
+    # 文本搜索时的两路召回阈值
+    TEXT_TO_TEXT_THRESHOLD: float = float(os.environ.get("TEXT_TO_TEXT_THRESHOLD", "0.8"))  # 文本搜媒体描述的阈值
+    TEXT_TO_IMAGE_THRESHOLD: float = float(os.environ.get("TEXT_TO_IMAGE_THRESHOLD", "0.1"))  # 文本搜图像的阈值
+    
+    # 图像搜索的阈值
+    IMAGE_SEARCH_THRESHOLD: float = float(os.environ.get("IMAGE_SEARCH_THRESHOLD", "0.5"))  # 图搜图的阈值
 
     class Config:
         # 支持多个env文件，优先级从高到低

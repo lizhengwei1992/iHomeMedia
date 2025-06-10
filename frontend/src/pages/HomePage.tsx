@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { mediaApi, searchApi } from '@/services/api'
 import { MediaItem } from '@/types/media'
@@ -8,10 +8,11 @@ import UploadForm from '@/components/media/UploadForm'
 import PullToRefresh from '@/components/common/PullToRefresh'
 import Pagination from '@/components/common/Pagination'
 import SearchBox from '@/components/search/SearchBox'
-import SearchResults from '@/components/search/SearchResults'
+
 
 const HomePage = () => {
   const { logout } = useAuth()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -30,14 +31,7 @@ const HomePage = () => {
   const [isPageChanging, setIsPageChanging] = useState(false) // 添加页面切换状态
   
   // 搜索相关状态
-  const [isSearchMode, setIsSearchMode] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
-  const [searchStats, setSearchStats] = useState({
-    totalResults: 0,
-    searchTime: 0
-  })
   
   // 加载媒体数据
   const loadMedia = async (page = currentPage) => {
@@ -67,42 +61,9 @@ const HomePage = () => {
     }
   }
   
-  // 首次加载和URL参数处理
+  // 首次加载
   useEffect(() => {
-    // 检查是否有从媒体查看器传递的搜索结果
-    const searchMode = searchParams.get('search_mode')
-    const query = searchParams.get('query')
-    const results = searchParams.get('results')
-    const totalResults = searchParams.get('total_results')
-    const searchTime = searchParams.get('search_time')
-    
-    if (searchMode === 'similar' && query && results) {
-      // 进入搜索模式，显示相似搜索结果
-      try {
-        const parsedResults = JSON.parse(results)
-        setIsSearchMode(true)
-        setSearchQuery(query)
-        setSearchResults(parsedResults)
-        setSearchStats({
-          totalResults: parseInt(totalResults || '0'),
-          searchTime: parseFloat(searchTime || '0')
-        })
-        
-        console.log('📋 加载相似搜索结果:', {
-          query,
-          resultsCount: parsedResults.length,
-          totalResults: parseInt(totalResults || '0')
-        })
-        
-        // 清除URL参数
-        setSearchParams({ tab: activeTab, page: currentPage.toString() })
-      } catch (err) {
-        console.error('解析搜索结果失败:', err)
-        loadMedia()
-      }
-    } else {
-      loadMedia()
-    }
+    loadMedia()
   }, [])
   
   // 监听页码变化
@@ -153,13 +114,12 @@ const HomePage = () => {
     if (!query.trim()) return
     
     setIsSearching(true)
-    setIsSearchMode(true)
-    setSearchQuery(query)
     
     try {
       const response = await searchApi.searchByText({
-        query: query
-        // threshold和limit参数已移除，后端使用配置的固定阈值
+        query: query,
+        limit: 100
+        // threshold参数已移除，后端使用配置的固定阈值(0.15)
       })
       
       const data = response.data
@@ -174,15 +134,18 @@ const HomePage = () => {
         searchTime: data.search_time
       });
       
-      setSearchResults(data.results || [])
-      setSearchStats({
-        totalResults: data.total_results || 0,
-        searchTime: data.search_time || 0
+      // 跳转到搜索结果页面
+      const searchParams = new URLSearchParams({
+        query: data.query || query,
+        results: JSON.stringify(data.results || []),
+        total_results: String(data.total_results || 0),
+        search_time: String(data.search_time || 0)
       })
+      
+      navigate(`/search/results?${searchParams.toString()}`)
+      
     } catch (err) {
       console.error('搜索失败:', err)
-      setSearchResults([])
-      setSearchStats({ totalResults: 0, searchTime: 0 })
       setError('搜索失败，请稍后重试')
     } finally {
       setIsSearching(false)
@@ -191,21 +154,16 @@ const HomePage = () => {
   
   // 清空搜索
   const handleClearSearch = () => {
-    setIsSearchMode(false)
-    setSearchQuery('')
-    setSearchResults([])
-    setSearchStats({ totalResults: 0, searchTime: 0 })
+    // 搜索现在跳转到独立页面，这里不需要清空状态
     setError('')
   }
 
   // 处理以图搜图
   const handleImageSearch = async (file: File) => {
     setIsSearching(true)
-    setIsSearchMode(true)
-    setSearchQuery(`图片搜索: ${file.name}`)
     
     try {
-      const response = await searchApi.searchByImage(file)
+      const response = await searchApi.searchByImage(file, 100)
       const data = response.data
       
       // 添加调试日志
@@ -218,15 +176,18 @@ const HomePage = () => {
         searchTime: data.search_time
       });
       
-      setSearchResults(data.results || [])
-      setSearchStats({
-        totalResults: data.total_results || 0,
-        searchTime: data.search_time || 0
+      // 跳转到搜索结果页面
+      const searchParams = new URLSearchParams({
+        query: `图片搜索: ${file.name}`,
+        results: JSON.stringify(data.results || []),
+        total_results: String(data.total_results || 0),
+        search_time: String(data.search_time || 0)
       })
+      
+      navigate(`/search/results?${searchParams.toString()}`)
+      
     } catch (err) {
       console.error('以图搜图失败:', err)
-      setSearchResults([])
-      setSearchStats({ totalResults: 0, searchTime: 0 })
       setError('以图搜图失败，请稍后重试')
     } finally {
       setIsSearching(false)
@@ -305,17 +266,8 @@ const HomePage = () => {
           </div>
         )}
 
-        {/* 搜索结果或正常列表 */}
-        {isSearchMode ? (
-          <SearchResults
-            results={searchResults}
-            isLoading={isSearching}
-            query={searchQuery}
-            searchTime={searchStats.searchTime}
-            totalResults={searchStats.totalResults}
-          />
-        ) : (
-          <>
+        {/* 正常列表 */}
+        <>
         {/* 类型标签和刷新按钮 */}
         <div className="flex justify-between items-center border-b border-gray-200 mb-6">
           <div className="flex">
@@ -460,7 +412,6 @@ const HomePage = () => {
           </div>
         )}
         </>
-        )}
           </main>
         </PullToRefresh>
       </div>

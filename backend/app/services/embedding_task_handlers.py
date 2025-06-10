@@ -197,13 +197,12 @@ async def handle_description_update_task(payload: Dict[str, Any]) -> Dict[str, A
 
 async def handle_search_embedding_task(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    处理搜索查询的embedding生成任务（高优先级）
+    处理搜索查询的embedding生成任务（高优先级，使用配置的固定阈值）
     
     Args:
         payload: 包含以下字段的字典
             - query: 搜索查询文本
             - limit: 搜索结果限制
-            - score_threshold: 分数阈值
     
     Returns:
         Dict: 搜索结果
@@ -211,18 +210,16 @@ async def handle_search_embedding_task(payload: Dict[str, Any]) -> Dict[str, Any
     try:
         query = payload['query']
         limit = payload.get('limit', 20)
-        score_threshold = payload.get('score_threshold', 0.3)
         
         logger.info(f"开始处理搜索查询: {query}")
         
         # 获取服务实例
         vector_storage = get_vector_storage_service()
         
-        # 执行搜索
+        # 执行搜索（使用配置的固定阈值）
         search_result = await vector_storage.search_by_text(
             query=query,
-            limit=limit,
-            score_threshold=score_threshold
+            limit=limit
         )
         
         if not search_result.get('success'):

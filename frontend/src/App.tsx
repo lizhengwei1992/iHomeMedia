@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
 import MediaViewPage from './pages/MediaViewPage'
+import SearchResultsPage from './pages/SearchResultsPage'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 
 // Protected route component
@@ -26,6 +27,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <HomePage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/search/results" 
+            element={
+              <ProtectedRoute>
+                <SearchResultsPage />
               </ProtectedRoute>
             } 
           />

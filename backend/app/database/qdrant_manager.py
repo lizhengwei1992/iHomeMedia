@@ -130,24 +130,22 @@ class QdrantManager:
         self,
         query_vector: List[float],
         limit: int = 10,
-        score_threshold: float = None,
         filters: Optional[Filter] = None
     ) -> List[Dict[str, Any]]:
         """
-        在文本embedding集合中搜索
+        在文本embedding集合中搜索（使用配置的固定阈值）
         
         Args:
             query_vector: 查询向量
             limit: 返回结果数量限制
-            score_threshold: 相似度阈值（如果未提供，使用配置的值）
             filters: 搜索过滤条件
             
         Returns:
             List[Dict]: 搜索结果列表
         """
         try:
-            # 使用配置的文本搜索阈值
-            threshold = score_threshold if score_threshold is not None else settings.TEXT_SEARCH_THRESHOLD
+            # 使用配置的文本搜索阈值（不允许外部修改）
+            threshold = settings.TEXT_TO_TEXT_THRESHOLD
             
             search_result = await asyncio.to_thread(
                 self.client.search,
@@ -179,24 +177,27 @@ class QdrantManager:
         self,
         query_vector: List[float],
         limit: int = 10,
-        score_threshold: float = None,
-        filters: Optional[Filter] = None
+        filters: Optional[Filter] = None,
+        search_type: str = "image_to_image"
     ) -> List[Dict[str, Any]]:
         """
-        在图像embedding集合中搜索
+        在图像embedding集合中搜索（使用配置的固定阈值）
         
         Args:
             query_vector: 查询向量
             limit: 返回结果数量限制
-            score_threshold: 相似度阈值（如果未提供，使用配置的值）
             filters: 搜索过滤条件
+            search_type: 搜索类型 ("text_to_image" 或 "image_to_image")
             
         Returns:
             List[Dict]: 搜索结果列表
         """
         try:
-            # 使用配置的图像搜索阈值
-            threshold = score_threshold if score_threshold is not None else settings.IMAGE_SEARCH_THRESHOLD
+            # 根据搜索类型使用不同的阈值
+            if search_type == "text_to_image":
+                threshold = settings.TEXT_TO_IMAGE_THRESHOLD
+            else:  # image_to_image
+                threshold = settings.IMAGE_SEARCH_THRESHOLD
             
             search_result = await asyncio.to_thread(
                 self.client.search,
@@ -229,36 +230,36 @@ class QdrantManager:
         text_vector: Optional[List[float]] = None,
         image_vector: Optional[List[float]] = None,
         limit: int = 10,
-        score_threshold: float = None,
         filters: Optional[Filter] = None
     ) -> List[Dict[str, Any]]:
         """
-        多模态搜索：同时搜索文本和图像embedding
+        多模态搜索：同时搜索文本和图像embedding（使用配置的固定阈值）
         
         Args:
             text_vector: 文本查询向量
             image_vector: 图像查询向量
             limit: 返回结果数量限制
-            score_threshold: 相似度阈值（如果未提供，使用配置的值）
             filters: 搜索过滤条件
             
         Returns:
             List[Dict]: 合并后的搜索结果
         """
         try:
-            # 使用配置的阈值，不允许修改
-            threshold = score_threshold if score_threshold is not None else settings.SEARCH_THRESHOLD
+            # 使用配置的图像搜索阈值作为基准
+            threshold = settings.IMAGE_SEARCH_THRESHOLD
             
             results = []
+            text_results = []
+            image_results = []
             
             # 搜索文本模态
             if text_vector:
-                text_results = await self.search_by_text(text_vector, limit, threshold, filters)
+                text_results = await self.search_by_text(text_vector, limit, filters)
                 results.extend(text_results)
             
             # 搜索图像模态
             if image_vector:
-                image_results = await self.search_by_image(image_vector, limit, threshold, filters)
+                image_results = await self.search_by_image(image_vector, limit, filters, "image_to_image")
                 results.extend(image_results)
             
             # 提高初始搜索的阈值，减少低质量结果

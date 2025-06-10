@@ -565,17 +565,15 @@ class VectorStorageService:
     async def search_by_text(
         self,
         query: str,
-        limit: int = 10,
-        threshold: float = None
+        limit: int = 10
     ) -> Dict[str, Any]:
         """
         基于文本查询进行搜索
-        策略：同时搜索文本模态和图像模态，合并去重返回结果
+        策略：文本搜文本+文本搜图像两路召回，使用配置的固定阈值
         
         Args:
             query: 搜索查询
             limit: 返回结果数量限制
-            threshold: 相似度阈值（如果未提供，使用配置的值）
             
         Returns:
             Dict: 搜索结果
@@ -583,9 +581,9 @@ class VectorStorageService:
         start_time = time.time()
         
         try:
-            # 生成查询embedding
+            # 生成查询embedding（使用搜索专用方法）
             embedding_start = time.time()
-            query_result = await self.embedding_service.embed_text(query)
+            query_result = await self.embedding_service.embed_query_text(query)
             embedding_time = time.time() - embedding_start
             
             if not query_result['success']:
@@ -596,22 +594,21 @@ class VectorStorageService:
             
             query_vector = query_result['embedding']
             
-            # 使用对应的搜索阈值
-            text_threshold = settings.TEXT_SEARCH_THRESHOLD
-            image_threshold = settings.IMAGE_SEARCH_THRESHOLD
+            # 使用专门的文搜图阈值配置
+            text_to_text_threshold = settings.TEXT_TO_TEXT_THRESHOLD  # 文搜文（搜索媒体描述）
+            text_to_image_threshold = settings.TEXT_TO_IMAGE_THRESHOLD  # 文搜图（搜索图像内容）
             
-            # 1. 搜索文本模态（使用文本搜索阈值）
+            # 1. 搜索文本模态（使用文搜文阈值）
             text_results = await self.qdrant_manager.search_by_text(
                 query_vector=query_vector,
-                limit=limit * 2,  # 获取更多候选，确保去重后有足够结果
-                score_threshold=text_threshold
+                limit=limit * 2  # 获取更多候选，确保去重后有足够结果
             )
             
-            # 2. 搜索图像模态（使用图像搜索阈值）
+            # 2. 搜索图像模态（使用文搜图阈值）
             image_results = await self.qdrant_manager.search_by_image(
                 query_vector=query_vector,
                 limit=limit * 2,  # 获取更多候选，确保去重后有足够结果
-                score_threshold=image_threshold
+                search_type="text_to_image"
             )
             
             # 3. 合并去重结果
@@ -648,8 +645,8 @@ class VectorStorageService:
             
             search_time = time.time() - start_time
             
-            logger.info(f"文本查询搜索完成: 文本模态{len(text_results)}个(阈值{text_threshold}), "
-                       f"图像模态{len(image_results)}个(阈值{image_threshold}), 合并后{len(final_results)}个")
+            logger.info(f"文本查询搜索完成: 文本模态{len(text_results)}个(阈值{text_to_text_threshold}), "
+                       f"图像模态{len(image_results)}个(阈值{text_to_image_threshold}), 合并后{len(final_results)}个")
             
             return {
                 'success': True,
@@ -657,8 +654,8 @@ class VectorStorageService:
                 'search_time': search_time,
                 'embedding_time': embedding_time,
                 'query': query,
-                'text_threshold_used': text_threshold,
-                'image_threshold_used': image_threshold,
+                'text_to_text_threshold_used': text_to_text_threshold,
+                'text_to_image_threshold_used': text_to_image_threshold,
                 'text_modal_count': len(text_results),
                 'image_modal_count': len(image_results),
                 'final_count': len(final_results)
@@ -675,24 +672,22 @@ class VectorStorageService:
         self,
         media_id: str,
         limit: int = 10,
-        threshold: float = None,
         similarity_type: str = "multimodal"
     ) -> Dict[str, Any]:
         """
-        查找相似媒体内容
+        查找相似媒体内容（图搜图）
         
         Args:
             media_id: 媒体ID
             limit: 返回结果数量限制
-            threshold: 相似度阈值（如果未提供，使用配置的值）
             similarity_type: 相似性类型
             
         Returns:
             Dict: 搜索结果
         """
         try:
-            # 使用配置的阈值，不允许修改
-            search_threshold = settings.SEARCH_THRESHOLD
+            # 使用图搜图的阈值
+            image_search_threshold = settings.IMAGE_SEARCH_THRESHOLD
             
             # 获取目标媒体的embedding
             # TODO: 实现通过media_id获取embedding的方法
@@ -703,7 +698,7 @@ class VectorStorageService:
                 'results': [],
                 'search_time': 0,
                 'media_id': media_id,
-                'threshold_used': search_threshold,
+                'threshold_used': image_search_threshold,
                 'message': '相似内容查找功能开发中'
             }
             

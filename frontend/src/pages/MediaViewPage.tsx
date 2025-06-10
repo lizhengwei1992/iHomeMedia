@@ -27,6 +27,13 @@ const MediaViewPage = () => {
   const fromPage = searchParams.get('from') || '1'
   const mediaType = searchParams.get('type') || 'all'
   const activeTab = searchParams.get('tab') || 'all'
+  
+  // 搜索结果相关参数
+  const fromSearch = searchParams.get('from_search') === 'true'
+  const searchQuery = searchParams.get('search_query') || ''
+  const searchResultsJson = searchParams.get('search_results')
+  const searchIndex = parseInt(searchParams.get('search_index') || '0')
+  const searchPage = searchParams.get('page') || '1'
 
   // 获取媒体数据
   useEffect(() => {
@@ -37,22 +44,80 @@ const MediaViewPage = () => {
         setMedia(null) // 清空当前媒体状态
         setRenderKey(prev => prev + 1)
 
-        // 获取媒体列表
-        const response = await mediaApi.getList({
-          page: 1,
-          page_size: 100, // 获取更多数据以支持切换（后端限制最大100）
-          ...(activeTab !== 'all' && { 
-            media_type: activeTab === 'photos' ? 'photo' : 'video' 
-          }),
-        })
+        let mediaList: MediaItem[] = []
 
-        const mediaList = response.data.items || []
+        if (fromSearch && searchResultsJson) {
+          // 如果来自搜索结果，转换搜索结果为MediaItem格式
+          try {
+            const searchResults = JSON.parse(searchResultsJson)
+            mediaList = searchResults.map((result: any) => {
+              const metadata = result.metadata;
+              
+              const fileName = metadata.file_name || '未知文件';
+              const fileType = metadata.file_type || 'photo';
+              const filePath = metadata.relative_path || metadata.file_path || '';
+              const fileSize = metadata.file_size || 0;
+              const uploadTime = metadata.upload_time || '';
+              const description = metadata.description || '';
+              
+              const originalUrl = metadata.original_url || `/media/${filePath}`;
+              const thumbnailUrl = metadata.thumbnail_url || `/media/${filePath}`;
+              
+              const mediaId = metadata.file_id || fileName;
+              
+              return {
+                id: mediaId,
+                name: fileName,
+                type: fileType.toLowerCase() as 'photo' | 'video',
+                path: filePath,
+                size: fileSize,
+                url: originalUrl,
+                thumbnail_url: thumbnailUrl,
+                upload_date: uploadTime,
+                description: description,
+                score: result.score || 0,
+                width: metadata.width,
+                height: metadata.height,
+                global_media_id: metadata.global_media_id || result.media_id,
+              }
+            })
+            
+            console.log('📋 从搜索结果加载媒体:', {
+              searchQuery,
+              mediaCount: mediaList.length,
+              currentIndex: searchIndex
+            })
+          } catch (err) {
+            console.error('解析搜索结果失败:', err)
+            setError('解析搜索结果失败')
+            setIsLoading(false)
+            return
+          }
+        } else {
+          // 正常模式，从API获取媒体列表
+          const response = await mediaApi.getList({
+            page: 1,
+            page_size: 100, // 获取更多数据以支持切换（后端限制最大100）
+            ...(activeTab !== 'all' && { 
+              media_type: activeTab === 'photos' ? 'photo' : 'video' 
+            }),
+          })
+          mediaList = response.data.items || []
+        }
+
         setAllMedia(mediaList)
 
         // 查找当前媒体项
-        const currentMediaIndex = mediaList.findIndex((item: MediaItem) => item.id === mediaId)
+        let currentMediaIndex = -1
+        if (fromSearch) {
+          // 搜索结果模式，使用传递的索引
+          currentMediaIndex = searchIndex
+        } else {
+          // 正常模式，根据mediaId查找
+          currentMediaIndex = mediaList.findIndex((item: MediaItem) => item.id === mediaId)
+        }
         
-        if (currentMediaIndex >= 0) {
+        if (currentMediaIndex >= 0 && currentMediaIndex < mediaList.length) {
           setMedia(mediaList[currentMediaIndex])
           setCurrentIndex(currentMediaIndex)
           // 初始化描述（从服务器获取）
@@ -74,11 +139,24 @@ const MediaViewPage = () => {
     if (mediaId) {
       loadMediaData()
     }
-  }, [mediaId, activeTab])
+  }, [mediaId, activeTab, fromSearch, searchResultsJson, searchIndex])
 
   // 处理返回
   const handleBack = () => {
-    navigate(`/?page=${fromPage}&tab=${activeTab}`)
+    if (fromSearch) {
+      // 返回搜索结果页面
+      const searchParams = new URLSearchParams({
+        query: searchQuery,
+        results: searchResultsJson || '',
+        total_results: '0',
+        search_time: '0',
+        page: searchPage
+      })
+      navigate(`/search/results?${searchParams.toString()}`)
+    } else {
+      // 返回主页
+      navigate(`/?page=${fromPage}&tab=${activeTab}`)
+    }
   }
 
   // 处理下载
@@ -101,7 +179,7 @@ const MediaViewPage = () => {
     
     try {
       // 调用相似搜索API
-      const response = await searchApi.searchSimilarByFilePath(media.path || '')
+      const response = await searchApi.searchSimilarByFilePath(media.path || '', 100)
       const data = response.data
       
       console.log('🔍 相似图片搜索API响应:', {
@@ -112,17 +190,15 @@ const MediaViewPage = () => {
         searchTime: data.search_time
       });
       
-      // 跳转到首页并显示搜索结果
-      // 通过URL参数传递搜索结果
+      // 跳转到搜索结果页面
       const searchParams = new URLSearchParams({
-        search_mode: 'similar',
         query: data.query || `相似图片搜索: ${media.name}`,
         results: JSON.stringify(data.results || []),
         total_results: String(data.total_results || 0),
         search_time: String(data.search_time || 0)
       })
       
-      navigate(`/?${searchParams.toString()}`)
+      navigate(`/search/results?${searchParams.toString()}`)
       
     } catch (err) {
       console.error('找相似失败:', err)
@@ -169,7 +245,21 @@ const MediaViewPage = () => {
   const handlePrevious = () => {
     if (currentIndex > 0) {
       const prevMedia = allMedia[currentIndex - 1]
-      navigate(`/media/view/${prevMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      
+      if (fromSearch) {
+        // 搜索结果模式，传递搜索相关参数
+        const params = new URLSearchParams({
+          from_search: 'true',
+          search_query: searchQuery,
+          search_results: searchResultsJson || '',
+          search_index: (currentIndex - 1).toString(),
+          page: searchPage
+        })
+        navigate(`/media/view/${prevMedia.id}?${params.toString()}`, { replace: true })
+      } else {
+        // 正常模式
+        navigate(`/media/view/${prevMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      }
     }
   }
 
@@ -177,7 +267,21 @@ const MediaViewPage = () => {
   const handleNext = () => {
     if (currentIndex < allMedia.length - 1) {
       const nextMedia = allMedia[currentIndex + 1]
-      navigate(`/media/view/${nextMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      
+      if (fromSearch) {
+        // 搜索结果模式，传递搜索相关参数
+        const params = new URLSearchParams({
+          from_search: 'true',
+          search_query: searchQuery,
+          search_results: searchResultsJson || '',
+          search_index: (currentIndex + 1).toString(),
+          page: searchPage
+        })
+        navigate(`/media/view/${nextMedia.id}?${params.toString()}`, { replace: true })
+      } else {
+        // 正常模式
+        navigate(`/media/view/${nextMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      }
     }
   }
 
@@ -348,18 +452,10 @@ const MediaViewPage = () => {
                 <button
                   onClick={handleFindSimilar}
                   disabled={isSearchingSimilar}
-                  className="text-white hover:text-blue-400 transition-colors disabled:opacity-50"
+                  className="text-white hover:text-blue-400 transition-colors disabled:opacity-50 text-sm px-2 py-1 rounded"
                   title="找相似"
                 >
-                  {isSearchingSimilar ? (
-                    <svg className="w-6 h-6 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  ) : (
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  )}
+                  {isSearchingSimilar ? '搜索中...' : '找相似'}
                 </button>
               )}
               

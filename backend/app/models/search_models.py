@@ -29,7 +29,7 @@ class SearchFilters(BaseModel):
 class SearchRequest(BaseModel):
     """搜索请求模型"""
     query: str = Field(..., description="搜索查询文本")
-    threshold: float = Field(default=settings.SEARCH_THRESHOLD, ge=0.0, le=1.0, description="相似度阈值")
+    limit: int = Field(default=10, ge=1, le=100, description="返回结果数量限制")
 
 class SimilarSearchRequest(BaseModel):
     """相似内容搜索请求"""
@@ -37,7 +37,6 @@ class SimilarSearchRequest(BaseModel):
     search_type: SearchType = Field(default=SearchType.MULTIMODAL, description="搜索类型")
     filters: Optional[SearchFilters] = Field(default=None, description="搜索过滤条件")
     limit: int = Field(default=10, ge=1, le=50, description="返回结果数量限制")
-    score_threshold: float = Field(default=settings.SEARCH_THRESHOLD, ge=0.0, le=1.0, description="相似度阈值")
 
 class MediaSearchResult(BaseModel):
     """单个媒体搜索结果"""
@@ -140,7 +139,6 @@ class SimilarMediaRequest(BaseModel):
     """相似媒体查找请求"""
     media_id: str = Field(..., description="参考媒体文件ID")
     limit: int = Field(default=10, ge=1, le=50, description="返回结果数量限制")
-    threshold: float = Field(default=settings.SEARCH_THRESHOLD, ge=0.0, le=1.0, description="相似度阈值")
     similarity_type: str = Field(default="multimodal", description="相似性类型")
 
 class BatchEmbeddingRequest(BaseModel):

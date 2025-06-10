@@ -90,20 +90,18 @@ class TaskManager:
     async def handle_search_query(
         self,
         query: str,
-        limit: int = 20,
-        threshold: float = None
+        limit: int = 20
     ) -> dict:
-        """处理搜索查询（同步处理，最高优先级）"""
+        """处理搜索查询（同步处理，最高优先级，使用配置的固定阈值）"""
         try:
             # 搜索是同步的，不通过任务队列
             from app.services.vector_storage_service import get_vector_storage_service
             vector_storage = get_vector_storage_service()
             
-            # 直接调用搜索方法
+            # 直接调用搜索方法（使用配置的固定阈值）
             search_result = await vector_storage.search_by_text(
                 query=query,
-                limit=limit,
-                threshold=threshold
+                limit=limit
             )
             
             return search_result

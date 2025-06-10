@@ -42,11 +42,10 @@ async def search_by_text(
         from app.services.task_manager import get_task_manager
         task_manager = get_task_manager()
         
-        # 执行搜索
+        # 执行搜索（使用配置的固定阈值）
         search_results = await task_manager.handle_search_query(
             query=request.query,
-            limit=1000,  # 大数量限制，实际由阈值控制
-            threshold=None  # 使用配置的默认阈值
+            limit=request.limit
         )
         
         if not search_results['success']:
@@ -299,6 +298,7 @@ async def migrate_descriptions(
 @router.post("/by-image", response_model=SearchResponse)
 async def search_by_image(
     image: UploadFile = File(...),
+    limit: int = Query(100, ge=1, le=500, description="返回结果数量限制"),
     current_user: str = Depends(get_current_user)
 ) -> Any:
     """
@@ -374,7 +374,7 @@ async def search_by_image(
         
         search_results = await qdrant_manager.search_by_image(
             query_vector=image_embedding,
-            limit=1000,  # 大数量限制，实际由阈值控制
+            limit=limit,
             score_threshold=None  # 使用配置的默认阈值
         )
         
@@ -424,6 +424,7 @@ async def search_by_image(
 @router.post("/similar-by-file", response_model=SearchResponse)
 async def search_similar_by_file_path(
     file_path: str = Form(..., description="媒体文件路径"),
+    limit: int = Query(100, ge=1, le=500, description="返回结果数量限制"),
     current_user: str = Depends(get_current_user)
 ) -> Any:
     """
@@ -509,7 +510,7 @@ async def search_similar_by_file_path(
         
         search_results = await qdrant_manager.search_by_image(
             query_vector=image_embedding,
-            limit=1000,  # 大数量限制，实际由阈值控制
+            limit=limit + 10,  # 多获取一些，用于排除当前文件
             score_threshold=None  # 使用配置的默认阈值
         )
         
@@ -534,7 +535,9 @@ async def search_similar_by_file_path(
             }
             filtered_results.append(formatted_result)
             
-            # 不限制数量，返回所有满足阈值的结果
+            # 达到指定数量后停止
+            if len(filtered_results) >= limit:
+                break
         
         return SearchResponse(
             success=True,

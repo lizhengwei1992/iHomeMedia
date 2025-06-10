@@ -6,18 +6,25 @@ interface MediaGridProps {
   mediaItems: MediaItem[]
   isLoading: boolean
   viewMode?: 'grid' | 'list'
+  onItemClick?: (media: MediaItem) => void
 }
 
-const MediaGrid = ({ mediaItems, isLoading, viewMode = 'grid' }: MediaGridProps) => {
+const MediaGrid = ({ mediaItems, isLoading, viewMode = 'grid', onItemClick }: MediaGridProps) => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({})
   
   // 处理媒体点击
   const handleMediaClick = (media: MediaItem) => {
-    const currentPage = searchParams.get('page') || '1'
-    const activeTab = searchParams.get('tab') || 'all'
-    navigate(`/media/view/${media.id}?from=${currentPage}&tab=${activeTab}`)
+    if (onItemClick) {
+      // 使用自定义点击处理器
+      onItemClick(media)
+    } else {
+      // 默认行为：跳转到媒体查看页面
+      const currentPage = searchParams.get('page') || '1'
+      const activeTab = searchParams.get('tab') || 'all'
+      navigate(`/media/view/${media.id}?from=${currentPage}&tab=${activeTab}`)
+    }
   }
   
   // 图片加载失败处理
