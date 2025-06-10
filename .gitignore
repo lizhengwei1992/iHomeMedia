@@ -1,0 +1,62 @@
+# 敏感配置文件 - 不要提交到Git
+.local.env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 向量数据库文件
+qdrant_storage/
+qdrant_data/
+
+# 媒体文件 (可选，如果不想提交媒体文件)
+# /media/
+
+# 测试结果文件
+test_results.json
+*_results.json
+
+# 备份文件
+*.bak
+*.backup
+
+# 环境特定文件
+.local.*
+local.* 

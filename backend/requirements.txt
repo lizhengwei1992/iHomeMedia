@@ -1,0 +1,18 @@
+fastapi==0.95.1
+uvicorn
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+aiofiles==23.1.0
+Pillow==9.5.0
+pillow-heif==0.10.1
+opencv-python==4.8.1.78
+python-dotenv==1.0.0
+pydantic>=1.10.8
+jinja2==3.1.2
+
+# 向量数据库和embedding相关
+qdrant-client==1.7.0
+dashscope==1.17.0
+numpy==1.24.3
+httpx==0.24.1

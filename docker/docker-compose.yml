@@ -1,0 +1,17 @@
+version: "3"
+
+services:
+  family-media-app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: family-media-app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../media:/app/media
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=a8s7d9f87asdf897as9df87a9s8d7f9a8s7df98as7df
+      - DEFAULT_USER=family
+      - DEFAULT_PASSWORD=123456
