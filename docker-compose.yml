@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # Qdrant向量数据库
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: ihomemedia-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - /media/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    # healthcheck:
+    #   test: ["CMD-SHELL", "timeout 5 bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 30s
+    networks:
+      - ihomemedia-network
+
+  # 后端服务
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ihomemedia-backend
+    restart: unless-stopped
+    depends_on:
+      - qdrant
+    env_file:
+      - .local.env
+    environment:
+      # 从.local.env文件加载环境变量
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - MEDIA_DIR=/media
+      - QDRANT_URL=http://qdrant:6333
+      - HOST=0.0.0.0
+      - PORT=5000
+      - DEBUG=false
+      - TEXT_TO_TEXT_THRESHOLD=${TEXT_TO_TEXT_THRESHOLD:-0.8}
+      - TEXT_TO_IMAGE_THRESHOLD=${TEXT_TO_IMAGE_THRESHOLD:-0.2}
+      - IMAGE_SEARCH_THRESHOLD=${IMAGE_SEARCH_THRESHOLD:-0.5}
+    volumes:
+      - /media:/media
+    networks:
+      - ihomemedia-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 前端服务 (包含Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ihomemedia-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - ihomemedia-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  ihomemedia-network:
+    driver: bridge
+
+volumes:
+  qdrant-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /media/qdrant 
