@@ -267,7 +267,7 @@ const HomePage = () => {
         )}
 
         {/* 正常列表 */}
-        <>
+          <>
         {/* 类型标签和刷新按钮 */}
         <div className="flex justify-between items-center border-b border-gray-200 mb-6">
           <div className="flex">

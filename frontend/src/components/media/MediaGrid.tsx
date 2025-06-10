@@ -21,9 +21,9 @@ const MediaGrid = ({ mediaItems, isLoading, viewMode = 'grid', onItemClick }: Me
       onItemClick(media)
     } else {
       // 默认行为：跳转到媒体查看页面
-      const currentPage = searchParams.get('page') || '1'
-      const activeTab = searchParams.get('tab') || 'all'
-      navigate(`/media/view/${media.id}?from=${currentPage}&tab=${activeTab}`)
+    const currentPage = searchParams.get('page') || '1'
+    const activeTab = searchParams.get('tab') || 'all'
+    navigate(`/media/view/${media.id}?from=${currentPage}&tab=${activeTab}`)
     }
   }
   

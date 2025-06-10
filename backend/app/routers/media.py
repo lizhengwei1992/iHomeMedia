@@ -255,7 +255,7 @@ async def delete_media_file_endpoint(
         else:
             raise HTTPException(status_code=404, detail="文件未找到")
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="文件未找到")
+            raise HTTPException(status_code=404, detail="文件未找到")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 

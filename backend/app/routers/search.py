@@ -374,8 +374,7 @@ async def search_by_image(
         
         search_results = await qdrant_manager.search_by_image(
             query_vector=image_embedding,
-            limit=limit,
-            score_threshold=None  # 使用配置的默认阈值
+            limit=limit
         )
         
         logger.info(f"图像搜索完成，找到 {len(search_results)} 个结果")
@@ -510,8 +509,7 @@ async def search_similar_by_file_path(
         
         search_results = await qdrant_manager.search_by_image(
             query_vector=image_embedding,
-            limit=limit + 10,  # 多获取一些，用于排除当前文件
-            score_threshold=None  # 使用配置的默认阈值
+            limit=limit + 10  # 多获取一些，用于排除当前文件
         )
         
         logger.info(f"图像搜索完成，找到 {len(search_results)} 个结果")

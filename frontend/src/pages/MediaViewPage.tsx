@@ -95,13 +95,13 @@ const MediaViewPage = () => {
           }
         } else {
           // 正常模式，从API获取媒体列表
-          const response = await mediaApi.getList({
-            page: 1,
-            page_size: 100, // 获取更多数据以支持切换（后端限制最大100）
-            ...(activeTab !== 'all' && { 
-              media_type: activeTab === 'photos' ? 'photo' : 'video' 
-            }),
-          })
+        const response = await mediaApi.getList({
+          page: 1,
+          page_size: 100, // 获取更多数据以支持切换（后端限制最大100）
+          ...(activeTab !== 'all' && { 
+            media_type: activeTab === 'photos' ? 'photo' : 'video' 
+          }),
+        })
           mediaList = response.data.items || []
         }
 
@@ -155,7 +155,7 @@ const MediaViewPage = () => {
       navigate(`/search/results?${searchParams.toString()}`)
     } else {
       // 返回主页
-      navigate(`/?page=${fromPage}&tab=${activeTab}`)
+    navigate(`/?page=${fromPage}&tab=${activeTab}`)
     }
   }
 
@@ -258,7 +258,7 @@ const MediaViewPage = () => {
         navigate(`/media/view/${prevMedia.id}?${params.toString()}`, { replace: true })
       } else {
         // 正常模式
-        navigate(`/media/view/${prevMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      navigate(`/media/view/${prevMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
       }
     }
   }
@@ -280,7 +280,7 @@ const MediaViewPage = () => {
         navigate(`/media/view/${nextMedia.id}?${params.toString()}`, { replace: true })
       } else {
         // 正常模式
-        navigate(`/media/view/${nextMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
+      navigate(`/media/view/${nextMedia.id}?from=${fromPage}&tab=${activeTab}&type=${mediaType}`, { replace: true })
       }
     }
   }
