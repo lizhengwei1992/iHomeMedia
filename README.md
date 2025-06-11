@@ -82,8 +82,8 @@ DASHSCOPE_API_KEY=your_dashscope_api_key_here
 USERNAME=family
 PASSWORD=123456
 
-# Qdrant数据库配置（使用独立部署）
-QDRANT_URL=http://host.docker.internal:6333
+# Qdrant数据库配置（独立部署模式）
+QDRANT_URL=http://localhost:6333
 
 # 其他配置项根据需要调整
 SECRET_KEY=your-secret-key-here
@@ -93,27 +93,26 @@ SECRET_KEY=your-secret-key-here
 
 根据不同需求，提供两种部署方式：
 
-#### 方式一：完整Docker部署（推荐）
+#### 方式一：完整Docker部署（推荐生产环境）
 
-使用部署脚本自动化部署：
+使用 `deploy.sh` 脚本一键部署，自动处理所有组件：
 
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-部署脚本采用混合架构：
-- ✅ 独立部署Qdrant向量数据库
-- ✅ Docker Compose部署前后端服务
-- ✅ 自动处理网络连接和健康检查
-- ✅ 支持向量维度自动修复
+该脚本会按顺序执行：
+1. **独立部署Qdrant向量数据库**（主机网络模式，端口6333）
+2. **构建并启动前后端服务**（使用docker-compose，主机网络模式）
+3. **自动处理健康检查和服务依赖**
 
-#### 方式二：前后端分离部署
+#### 方式二：前后端分离部署（推荐开发调试）
 
-适合开发调试或资源有限环境：
+适合开发调试或需要灵活控制的场景：
 
 ```bash
-# 1. 首先单独启动Qdrant数据库
+# 1. 首先手动启动Qdrant数据库（必需，仅需执行一次）
 docker run -d --name qdrant-standalone \
   --restart unless-stopped \
   -p 6333:6333 \
@@ -125,12 +124,17 @@ chmod +x start-app.sh
 ./start-app.sh
 ```
 
+在 `start-app.sh` 中可选择：
+- 仅启动后端服务（端口5000）
+- 仅启动前端服务（端口3000）
+- 同时启动前后端（推荐，支持完整功能）
+
 ### 5. 访问应用
 
 部署成功后，通过以下地址访问：
 
 - **前端应用**: http://localhost:3000
-- **API文档**: http://localhost:3000/api/v1/docs
+- **API文档**: http://localhost:5000/docs（仅前后端分离模式直接访问）
 - **Qdrant仪表板**: http://localhost:6333/dashboard
 
 ## 服务管理
@@ -150,28 +154,25 @@ docker logs -f qdrant-standalone    # Qdrant日志
 docker-compose down                 # 停止前后端
 docker stop qdrant-standalone       # 停止Qdrant
 
-# 停止所有服务
-docker-compose down && docker stop qdrant-standalone
-
 # 重启服务
 docker-compose restart              # 重启前后端
 docker restart qdrant-standalone    # 重启Qdrant
 
 # 完全重新构建部署
-./deploy.sh --build    # 强制重建
+./deploy.sh --build    # 强制重建镜像
 ./deploy.sh --clean    # 清理旧数据后重建
 ```
 
 ### 前后端分离部署管理
 
 ```bash
-# 启动应用（选择启动模式：仅后端/仅前端/同时启动）
+# 启动应用（交互式选择启动模式）
 ./start-app.sh
 
-# 停止应用（提供多种停止选项）
+# 停止应用（交互式选择停止方式）
 ./stop-app.sh
 
-# 管理Qdrant数据库
+# 管理Qdrant数据库（独立运行）
 docker stop qdrant-standalone     # 停止
 docker start qdrant-standalone    # 重启
 docker logs -f qdrant-standalone  # 查看日志
@@ -191,23 +192,36 @@ docker logs -f qdrant-standalone  # 查看日志
 
 ### 🐳 混合部署架构
 
-- **独立Qdrant容器**: 单独运行的向量数据库，使用主机网络（localhost:6333）
-- **前端容器**: Nginx + React静态文件，负责UI展示和反向代理
-- **后端容器**: FastAPI应用，通过host.docker.internal连接Qdrant
-- **网络通信**: 前后端通过docker-compose网络，后端通过主机网络访问Qdrant
+系统采用混合部署模式，确保数据稳定性和服务灵活性：
+
+- **独立Qdrant容器**: 单独运行的向量数据库服务
+  - 端口：6333（主机网络）
+  - 数据持久化：`/media/qdrant`
+  - 独立生命周期，不受前后端服务影响
+
+- **前端容器**: Nginx + React静态文件服务
+  - 端口：3000（通过主机网络访问）
+  - 反向代理：处理 `/api/` 路径到后端
+  - 静态文件服务和媒体文件代理
+
+- **后端容器**: FastAPI应用服务
+  - 端口：5000（主机网络模式）
+  - 直接通过 `localhost:6333` 连接Qdrant
+  - 处理业务逻辑和AI功能
+
+### 🌐 网络架构
+
+- **网络模式**: 所有容器使用主机网络模式（`network_mode: host`）
+- **服务通信**: 
+  - 前端 → 后端：通过主机网络 `localhost:5000`
+  - 后端 → Qdrant：通过主机网络 `localhost:6333`
+  - 客户端 → 前端：通过主机IP:3000访问
 
 ### 📁 数据持久化
 
-- **媒体文件**: 主机 `/media` 挂载到容器
+- **媒体文件**: 主机 `/media` 目录挂载到所有容器
 - **向量数据库**: 主机 `/media/qdrant` 持久化存储
 - **配置文件**: 通过环境变量和卷挂载
-
-### 🌐 网络配置
-
-- 前端端口：3000（HTTP）
-- 后端端口：5000（内部）
-- Qdrant端口：6333（主机网络）
-- 反向代理：Nginx处理 `/api/` 路径到后端
 
 ## 文件结构
 
@@ -229,7 +243,7 @@ iHomeMedia/
 │   ├── package.json       # Node.js依赖
 │   ├── server.py          # 前端代理服务器
 │   └── start-frontend.sh  # 前端启动脚本
-├── docker-compose.yml     # 前后端服务编排
+├── docker-compose.yml     # 前后端服务编排（主机网络模式）
 ├── deploy.sh             # 完整部署脚本（推荐）
 ├── start-app.sh          # 前后端分离启动脚本
 ├── stop-app.sh           # 应用停止脚本
@@ -323,7 +337,7 @@ npm run dev
 
 ### 基础设施
 - **Docker Compose**: 多容器编排
-- **Nginx**: Web服务器和反向代理
+- **主机网络**: 容器网络模式
 - **Linux**: 宿主操作系统
 
 ## 浏览器兼容性
@@ -380,6 +394,11 @@ npm run dev
    ./stop-app.sh  # 选择"清理占用端口的所有进程"
    ```
 
+6. **主机网络模式问题**
+   - 确保主机防火墙允许端口3000、5000、6333
+   - 检查端口冲突：`lsof -i:3000 -i:5000 -i:6333`
+   - 如果有端口冲突，使用`./stop-app.sh`清理
+
 ### 重置部署
 
 #### 完整Docker部署重置
@@ -399,7 +418,7 @@ docker system prune -f
 #### 前后端分离模式重置
 ```bash
 # 停止所有服务
-./stop-app.sh
+./stop-app.sh  # 选择"优雅停止所有服务"
 
 # 重启Qdrant（如果需要）
 docker restart qdrant-standalone
@@ -429,11 +448,12 @@ sudo rm -rf /media/photos/* /media/videos/* /media/thumbnails/* /media/qdrant/*
 - 建议在SSD硬盘上运行以获得更好性能
 - 媒体文件按日期自动归档存储
 - 定期备份 `/media` 目录中的重要数据
+- **网络模式**: 所有容器使用主机网络模式，确保服务间通信畅通
 - **部署模式选择**：
   - 生产环境推荐使用 `./deploy.sh` 完整Docker部署
   - 开发调试推荐使用 `./start-app.sh` 前后端分离模式
   - Qdrant数据库始终独立运行，确保数据稳定性
-- **向量维度问题**：如遇到"expected dim: 1536, got 1024"错误，使用 `./deploy.sh --fix-dimension` 修复
+- **向量维度问题**: 如遇到"expected dim: 1536, got 1024"错误，使用 `./deploy.sh --fix-dimension` 修复
 
 ## 安全说明
 
