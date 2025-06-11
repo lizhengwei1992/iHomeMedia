@@ -69,10 +69,10 @@ sudo chmod -R 755 /media
 复制环境变量模板并配置：
 
 ```bash
-cp env.template .env
+cp env.template .local.env
 ```
 
-编辑 `.env` 文件，配置必要的环境变量：
+编辑 `.local.env` 文件，配置必要的环境变量：
 
 ```bash
 # 阿里云DashScope API密钥（必需）
@@ -82,28 +82,48 @@ DASHSCOPE_API_KEY=your_dashscope_api_key_here
 USERNAME=family
 PASSWORD=123456
 
+# Qdrant数据库配置（使用独立部署）
+QDRANT_URL=http://host.docker.internal:6333
+
 # 其他配置项根据需要调整
 SECRET_KEY=your-secret-key-here
-QDRANT_HOST=qdrant
-QDRANT_PORT=6333
 ```
 
-### 4. 一键部署
+### 4. 部署方式选择
 
-使用部署脚本快速启动所有服务：
+根据不同需求，提供两种部署方式：
+
+#### 方式一：完整Docker部署（推荐）
+
+使用部署脚本自动化部署：
 
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-部署脚本会自动：
-- ✅ 检查系统要求
-- ✅ 准备媒体目录
-- ✅ 构建Docker镜像
-- ✅ 启动所有服务（Qdrant + 后端 + 前端）
-- ✅ 等待服务就绪
-- ✅ 显示访问信息
+部署脚本采用混合架构：
+- ✅ 独立部署Qdrant向量数据库
+- ✅ Docker Compose部署前后端服务
+- ✅ 自动处理网络连接和健康检查
+- ✅ 支持向量维度自动修复
+
+#### 方式二：前后端分离部署
+
+适合开发调试或资源有限环境：
+
+```bash
+# 1. 首先单独启动Qdrant数据库
+docker run -d --name qdrant-standalone \
+  --restart unless-stopped \
+  -p 6333:6333 \
+  -v /media/qdrant:/qdrant/storage \
+  qdrant/qdrant:latest
+
+# 2. 使用前后端分离脚本启动应用
+chmod +x start-app.sh
+./start-app.sh
+```
 
 ### 5. 访问应用
 
@@ -115,50 +135,66 @@ chmod +x deploy.sh
 
 ## 服务管理
 
-### 常用命令
+### 完整Docker部署管理
 
 ```bash
-# 查看服务状态
+# 查看所有服务状态
 docker-compose ps
+docker ps --filter "name=qdrant-standalone"
 
 # 查看日志
-docker-compose logs -f
+docker-compose logs -f              # 前后端日志
+docker logs -f qdrant-standalone    # Qdrant日志
 
 # 停止服务
-./stop.sh
-# 或手动停止
-docker-compose down
+docker-compose down                 # 停止前后端
+docker stop qdrant-standalone       # 停止Qdrant
+
+# 停止所有服务
+docker-compose down && docker stop qdrant-standalone
 
 # 重启服务
-docker-compose restart
+docker-compose restart              # 重启前后端
+docker restart qdrant-standalone    # 重启Qdrant
 
 # 完全重新构建部署
-./deploy.sh --clean
+./deploy.sh --build    # 强制重建
+./deploy.sh --clean    # 清理旧数据后重建
 ```
 
-### 日常管理
-
-使用管理脚本进行日常操作：
+### 前后端分离部署管理
 
 ```bash
-chmod +x manage.sh
-./manage.sh
+# 启动应用（选择启动模式：仅后端/仅前端/同时启动）
+./start-app.sh
+
+# 停止应用（提供多种停止选项）
+./stop-app.sh
+
+# 管理Qdrant数据库
+docker stop qdrant-standalone     # 停止
+docker start qdrant-standalone    # 重启
+docker logs -f qdrant-standalone  # 查看日志
 ```
 
-管理脚本提供以下功能：
-- 查看服务状态
-- 查看实时日志
-- 重启指定服务
-- 数据备份
-- 系统清理
+### Deploy脚本选项
+
+```bash
+./deploy.sh                    # 正常部署
+./deploy.sh --build           # 强制重新构建镜像
+./deploy.sh --clean           # 清理旧数据并重新部署
+./deploy.sh --fix-dimension   # 修复向量维度问题
+./deploy.sh --help           # 显示帮助信息
+```
 
 ## 架构说明
 
-### 🐳 容器化架构
+### 🐳 混合部署架构
 
+- **独立Qdrant容器**: 单独运行的向量数据库，使用主机网络（localhost:6333）
 - **前端容器**: Nginx + React静态文件，负责UI展示和反向代理
-- **后端容器**: FastAPI应用，提供API服务
-- **向量数据库**: Qdrant容器，存储AI向量数据
+- **后端容器**: FastAPI应用，通过host.docker.internal连接Qdrant
+- **网络通信**: 前后端通过docker-compose网络，后端通过主机网络访问Qdrant
 
 ### 📁 数据持久化
 
@@ -169,8 +205,8 @@ chmod +x manage.sh
 ### 🌐 网络配置
 
 - 前端端口：3000（HTTP）
-- Qdrant端口：6333-6334
-- 内部网络：ihomemedia-network
+- 后端端口：5000（内部）
+- Qdrant端口：6333（主机网络）
 - 反向代理：Nginx处理 `/api/` 路径到后端
 
 ## 文件结构
@@ -184,20 +220,21 @@ iHomeMedia/
 │   │   ├── database/       # 数据库管理
 │   │   └── utils/          # 工具函数
 │   ├── Dockerfile          # 后端Docker配置
-│   └── requirements.txt    # Python依赖
+│   ├── requirements.txt    # Python依赖
+│   └── start-backend.sh    # 后端启动脚本
 ├── frontend/               # React + TypeScript 前端
 │   ├── src/               # 前端源代码
 │   ├── dist/              # 构建输出
 │   ├── nginx.docker.conf  # Nginx配置
-│   └── package.json       # Node.js依赖
-├── docker-compose.yml     # Docker服务编排
-├── deploy.sh             # 一键部署脚本
-├── stop.sh               # 停止服务脚本
-├── manage.sh             # 日常管理脚本
-├── .env                  # 环境变量配置
-├── env.template          # 环境变量模板
-├── DEPLOYMENT.md         # 详细部署文档
-└── QUICK_START.md        # 快速启动指南
+│   ├── package.json       # Node.js依赖
+│   ├── server.py          # 前端代理服务器
+│   └── start-frontend.sh  # 前端启动脚本
+├── docker-compose.yml     # 前后端服务编排
+├── deploy.sh             # 完整部署脚本（推荐）
+├── start-app.sh          # 前后端分离启动脚本
+├── stop-app.sh           # 应用停止脚本
+├── .local.env            # 环境变量配置
+└── env.template          # 环境变量模板
 ```
 
 ### 数据目录结构
@@ -212,35 +249,51 @@ iHomeMedia/
 
 ## 开发模式
 
-### 本地开发环境
+### 推荐开发流程
 
-如需进行开发，可以单独启动服务：
+1. **启动数据库**（仅需一次）
+   ```bash
+   docker run -d --name qdrant-standalone \
+     -p 6333:6333 \
+     -v /media/qdrant:/qdrant/storage \
+     qdrant/qdrant:latest
+   ```
+
+2. **使用前后端分离模式开发**
+   ```bash
+   # 启动应用（推荐选择"同时启动前端和后端"）
+   ./start-app.sh
+   
+   # 开发完成后停止
+   ./stop-app.sh
+   ```
+
+3. **单独服务调试**
+   ```bash
+   # 仅启动后端服务 (http://localhost:5000)
+   cd backend && ./start-backend.sh
+   
+   # 仅启动前端服务 (http://localhost:3000)
+   cd frontend && ./start-frontend.sh
+   ```
+
+### 原生开发环境
+
+如需不使用容器进行开发：
 
 ```bash
-# 启动Qdrant（开发环境需要）
-docker run -p 6333:6333 qdrant/qdrant:v1.7.0
+# 1. 确保Qdrant运行（必需）
+docker run -d -p 6333:6333 -v /media/qdrant:/qdrant/storage qdrant/qdrant:latest
 
-# 后端开发
+# 2. 后端开发
 cd backend
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload
 
-# 前端开发（新终端）
+# 3. 前端开发（新终端）
 cd frontend
 npm install
 npm run dev
-```
-
-### 容器化开发
-
-推荐使用容器进行开发，保持环境一致性：
-
-```bash
-# 只启动Qdrant和后端，前端使用开发模式
-docker-compose up qdrant backend -d
-
-# 前端开发模式
-cd frontend && npm run dev
 ```
 
 ## 用户凭据
@@ -286,35 +339,88 @@ cd frontend && npm run dev
 
 1. **服务启动失败**
    ```bash
-   # 查看详细日志
+   # 查看前后端日志
    docker-compose logs -f
    
+   # 查看Qdrant日志
+   docker logs -f qdrant-standalone
+   
    # 检查端口占用
-   netstat -tlnp | grep 3000
+   netstat -tlnp | grep -E "3000|5000|6333"
    ```
 
-2. **AI功能不可用**
+2. **Qdrant连接问题**
+   ```bash
+   # 检查Qdrant服务状态
+   curl http://localhost:6333/
+   
+   # 重启Qdrant服务
+   docker restart qdrant-standalone
+   
+   # 如果向量维度错误，清理后重建
+   ./deploy.sh --fix-dimension
+   ```
+
+3. **AI功能不可用**
    - 检查DASHSCOPE_API_KEY是否正确配置
    - 确认网络可以访问阿里云服务
+   - 检查后端日志中的AI服务连接错误
    
-3. **媒体文件无法访问**
-   - 检查 `/media` 目录权限
+4. **媒体文件无法访问**
+   - 检查 `/media` 目录权限：`ls -la /media`
+   - 修复权限：`sudo chown -R $USER:$USER /media && sudo chmod -R 755 /media`
    - 确认目录挂载是否成功
+
+5. **前后端分离模式问题**
+   ```bash
+   # 检查进程状态
+   ./stop-app.sh  # 选择查看当前状态
+   
+   # 清理僵尸进程
+   ./stop-app.sh  # 选择"清理占用端口的所有进程"
+   ```
 
 ### 重置部署
 
-如需完全重置：
-
+#### 完整Docker部署重置
 ```bash
 # 停止并清理所有资源
 docker-compose down -v
+docker stop qdrant-standalone
+docker rm qdrant-standalone
+
+# 清理Docker系统
 docker system prune -f
 
 # 重新部署
 ./deploy.sh --clean
 ```
 
-详细的故障排除指南请参考 [DEPLOYMENT.md](DEPLOYMENT.md)
+#### 前后端分离模式重置
+```bash
+# 停止所有服务
+./stop-app.sh
+
+# 重启Qdrant（如果需要）
+docker restart qdrant-standalone
+
+# 重新启动应用
+./start-app.sh
+```
+
+### 数据清理与恢复
+
+```bash
+# 仅清理向量数据库（保留媒体文件）
+sudo rm -rf /media/qdrant/*
+docker restart qdrant-standalone
+
+# 清理缩略图缓存
+sudo rm -rf /media/thumbnails/*
+
+# 完全清理重置（谨慎使用）
+sudo rm -rf /media/photos/* /media/videos/* /media/thumbnails/* /media/qdrant/*
+```
 
 ## 注意事项
 
@@ -323,6 +429,11 @@ docker system prune -f
 - 建议在SSD硬盘上运行以获得更好性能
 - 媒体文件按日期自动归档存储
 - 定期备份 `/media` 目录中的重要数据
+- **部署模式选择**：
+  - 生产环境推荐使用 `./deploy.sh` 完整Docker部署
+  - 开发调试推荐使用 `./start-app.sh` 前后端分离模式
+  - Qdrant数据库始终独立运行，确保数据稳定性
+- **向量维度问题**：如遇到"expected dim: 1536, got 1024"错误，使用 `./deploy.sh --fix-dimension` 修复
 
 ## 安全说明
 
