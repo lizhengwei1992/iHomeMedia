@@ -233,9 +233,16 @@ const MediaViewPage = () => {
         // 没有更多媒体，返回列表
         handleBack()
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('删除失败:', error)
-      alert('删除失败，请重试')
+      
+      // 显示更详细的错误信息
+      const errorMessage = error?.response?.data?.detail || 
+                          error?.response?.data?.message || 
+                          error?.message || 
+                          '删除失败，请重试'
+      
+      alert(`删除失败: ${errorMessage}`)
     } finally {
       setIsDeleting(false)
     }

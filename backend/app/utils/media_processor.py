@@ -36,29 +36,110 @@ def create_thumbnail(file_path: str) -> str:
         # 确保缩略图目录存在
         os.makedirs(os.path.dirname(thumbnail_path), exist_ok=True)
         
-        # 打开图片并创建缩略图
+        # 特殊处理HEIC文件
+        if file_path.lower().endswith(('.heic', '.heif')):
+            return create_heic_thumbnail(file_path, thumbnail_path)
+        
+        # 处理其他格式的图片
         with Image.open(file_path) as img:
-            # 保持纵横比创建缩略图
-            img.thumbnail(settings.THUMBNAIL_SIZE)
+            # 其他格式正常处理
+            img_copy = img.copy()
             
-            # 如果原图是HEIC格式，将缩略图保存为JPEG格式以便浏览器显示
-            if file_path.lower().endswith(('.heic', '.heif')):
-                # 将HEIC缩略图保存为JPEG格式
-                thumbnail_path = thumbnail_path.rsplit('.', 1)[0] + '.jpg'
-                # 转换为RGB模式（JPEG不支持透明度）
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    img = img.convert('RGB')
-                img.save(thumbnail_path, 'JPEG', quality=85)
-                print(f"成功创建HEIC缩略图(转换为JPEG): {thumbnail_path}")
-            else:
-                # 其他格式正常保存
-                img.save(thumbnail_path, quality=85)
-                print(f"成功创建缩略图: {thumbnail_path}")
+            # 创建缩略图（兼容不同版本的Pillow）
+            try:
+                img_copy.thumbnail(settings.THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            except AttributeError:
+                # 兼容旧版本Pillow
+                img_copy.thumbnail(settings.THUMBNAIL_SIZE, Image.LANCZOS)
+            
+            # 转换模式以兼容保存格式
+            if img_copy.mode in ('RGBA', 'LA', 'P'):
+                img_copy = img_copy.convert('RGB')
+            
+            # 保存缩略图
+            img_copy.save(thumbnail_path, quality=85)
+            print(f"成功创建缩略图: {thumbnail_path}")
         
         return thumbnail_path
         
     except (UnidentifiedImageError, Exception) as e:
         print(f"创建缩略图失败: {str(e)}")
+        import traceback
+        print(f"详细错误信息: {traceback.format_exc()}")
+        return ""
+
+
+def create_heic_thumbnail(file_path: str, thumbnail_path: str) -> str:
+    """
+    专门处理HEIC文件的缩略图创建
+    """
+    try:
+        # HEIC缩略图保存为JPEG格式
+        jpeg_thumbnail_path = thumbnail_path.rsplit('.', 1)[0] + '.jpg'
+        
+        # 尝试使用pillow_heif处理
+        if HEIF_SUPPORTED:
+            try:
+                with Image.open(file_path) as img:
+                    # 创建图像副本，避免修改原始图像的只读属性
+                    img_copy = img.copy()
+                    
+                    # 如果需要转换模式，先转换
+                    if img_copy.mode in ('RGBA', 'LA', 'P'):
+                        img_copy = img_copy.convert('RGB')
+                    elif img_copy.mode not in ('RGB', 'L'):
+                        # 确保模式兼容
+                        img_copy = img_copy.convert('RGB')
+                    
+                    # 创建缩略图（兼容不同版本的Pillow）
+                    try:
+                        img_copy.thumbnail(settings.THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+                    except AttributeError:
+                        # 兼容旧版本Pillow
+                        img_copy.thumbnail(settings.THUMBNAIL_SIZE, Image.LANCZOS)
+                    
+                    # 保存为JPEG格式
+                    img_copy.save(jpeg_thumbnail_path, 'JPEG', quality=85)
+                    print(f"成功创建HEIC缩略图(转换为JPEG): {jpeg_thumbnail_path}")
+                    return jpeg_thumbnail_path
+                    
+            except Exception as heif_error:
+                print(f"pillow_heif处理失败: {str(heif_error)}")
+                # 继续尝试使用其他方法
+        
+        # 如果pillow_heif失败或不可用，尝试使用其他方法
+        print("尝试使用替代方法处理HEIC文件...")
+        
+        # 方法1：尝试用opencv读取（某些HEIC文件可能被opencv支持）
+        try:
+            import cv2
+            img_array = cv2.imread(file_path, cv2.IMREAD_COLOR)
+            if img_array is not None:
+                # 转换BGR to RGB
+                img_rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(img_rgb)
+                
+                # 创建缩略图
+                try:
+                    pil_image.thumbnail(settings.THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+                except AttributeError:
+                    pil_image.thumbnail(settings.THUMBNAIL_SIZE, Image.LANCZOS)
+                
+                pil_image.save(jpeg_thumbnail_path, 'JPEG', quality=85)
+                print(f"使用OpenCV成功创建HEIC缩略图: {jpeg_thumbnail_path}")
+                return jpeg_thumbnail_path
+                
+        except Exception as cv_error:
+            print(f"OpenCV处理HEIC失败: {str(cv_error)}")
+        
+        # 如果所有方法都失败，返回空字符串
+        print(f"无法为HEIC文件创建缩略图: {file_path}")
+        return ""
+        
+    except Exception as e:
+        print(f"HEIC缩略图创建失败: {str(e)}")
+        import traceback
+        print(f"详细错误信息: {traceback.format_exc()}")
         return ""
 
 

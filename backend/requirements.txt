@@ -4,8 +4,8 @@ python-multipart==0.0.20
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 aiofiles==23.1.0
-Pillow==10.4.0
-pillow-heif==0.10.1
+Pillow==9.5.0
+pillow-heif==0.16.0
 opencv-python==4.8.1.78
 python-dotenv==1.0.0
 pydantic>=1.10.8,<3.0
